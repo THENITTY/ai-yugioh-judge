@@ -116,14 +116,26 @@ def resolve_working_model():
 
 # --- Gestione Autenticazione ---
 def load_keys():
-    """Carica le chiavi dal file JSON locale."""
+    """Carica le chiavi da Streamlit Secrets (Cloud) o file JSON locale."""
+    keys = {}
+    
+    # 1. Priorità: Streamlit Secrets (Cloud)
+    try:
+        if "stored_keys" in st.secrets:
+            # Convertiamo to_dict per sicurezza
+            return dict(st.secrets["stored_keys"])
+    except FileNotFoundError:
+        pass # Nessun secrets.toml trovato in locale, normale
+        
+    # 2. Fallback: JSON Locale
     try:
         if os.path.exists("keys.json"):
             with open("keys.json", "r") as f:
                 return json.load(f)
     except Exception:
         pass
-    return {}
+        
+    return keys
 
 stored_keys = load_keys()
 
