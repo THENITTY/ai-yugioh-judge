@@ -115,26 +115,75 @@ def resolve_working_model():
     return genai.GenerativeModel("gemini-2.5-flash"), "gemini-2.5-flash (Default)"
 
 # --- Gestione Autenticazione ---
-if "api_key" not in st.session_state:
-    st.session_state.api_key = os.getenv("GEMINI_API_KEY", "")
+def load_keys():
+    """Carica le chiavi dal file JSON locale."""
+    try:
+        if os.path.exists("keys.json"):
+            with open("keys.json", "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+stored_keys = load_keys()
 
 st.sidebar.title("Configurazione ⚙️")
 
-if not st.session_state.api_key:
-    input_key = st.sidebar.text_input("Inserisci Gemini API Key", type="password")
-    if input_key:
-        st.session_state.api_key = input_key
-        with open(".env", "w") as f:
-            f.write(f"GEMINI_API_KEY={input_key}")
-        st.rerun()
-else:
-    st.sidebar.success("API Key caricata! ✅")
-    if st.sidebar.button("Cambia Key"):
+# Logica Multi-Profilo
+if stored_keys:
+    # Aggiungi un'opzione vuota/manuale
+    options = ["Seleziona un Profilo..."] + list(stored_keys.keys()) + ["🔑 Inserimento Manuale"]
+    
+    # Se abbiamo già una key in sessione, cerchiamo di capire a quale profilo appartiene (estetica)
+    index = 0
+    if "active_profile" in st.session_state:
+        if st.session_state.active_profile in options:
+            index = options.index(st.session_state.active_profile)
+
+    selected_profile = st.sidebar.selectbox("Gestore Chiavi:", options, index=index, key="profile_selector")
+    
+    if selected_profile in stored_keys:
+        st.session_state.api_key = stored_keys[selected_profile]
+        st.session_state.active_profile = selected_profile
+    elif selected_profile == "🔑 Inserimento Manuale":
+        # Reset della key se si passa a manuale e non ce n'è una manuale salvata
+        if st.session_state.get("active_profile") != "🔑 Inserimento Manuale":
+             st.session_state.api_key = os.getenv("GEMINI_API_KEY", "")
+             st.session_state.active_profile = "🔑 Inserimento Manuale"
+    else:
+        # Caso "Seleziona un Profilo..."
         st.session_state.api_key = ""
-        st.rerun()
+        st.session_state.active_profile = ""
+
+# Se non ci sono chiavi salvate o siamo in "Manuale", usiamo la logica standard
+if not stored_keys or (st.session_state.get("active_profile") == "🔑 Inserimento Manuale") or (not st.session_state.api_key and "active_profile" not in st.session_state):
+    
+    # Fallback su variabile d'ambiente standard se non settata
+    if "api_key" not in st.session_state:
+        st.session_state.api_key = os.getenv("GEMINI_API_KEY", "")
+
+    if not st.session_state.api_key:
+        st.sidebar.warning("Nessun profilo selezionato.")
+        input_key = st.sidebar.text_input("Inserisci Gemini API Key", type="password")
+        if input_key:
+            st.session_state.api_key = input_key
+            # Salvataggio facoltativo in .env solo se manuale
+            with open(".env", "w") as f:
+                f.write(f"GEMINI_API_KEY={input_key}")
+            st.rerun()
+    else:
+        # Caso in cui la chiave c'è (da .env o inserita) ma siamo in modalità manuale
+        st.sidebar.success("Key Manuale Caricata! ✅")
+        if st.sidebar.button("Cambia Key Manuale"):
+            st.session_state.api_key = ""
+            if os.path.exists(".env"): os.remove(".env") # Opzionale: pulizia
+            st.rerun()
+
+elif st.session_state.api_key:
+     st.sidebar.success(f"Profilo Attivo: **{selected_profile}** ✅")
 
 if not st.session_state.api_key:
-    st.warning("Inserisci la API Key nella sidebar per iniziare.")
+    st.info("👈 Seleziona un Profilo o inserisci una Key per iniziare.")
     st.stop()
 
 # --- Configurazione Gemini ---
@@ -182,9 +231,17 @@ if "manual_added_cards" not in st.session_state:
 
 # Funzione per reset
 def reset_app():
+    keys_to_keep = ['api_key', 'active_profile']
     for key in list(st.session_state.keys()):
-        if key == 'api_key': continue # Manteniamo la API Key
+        if key in keys_to_keep: continue
         del st.session_state[key]
+    
+    # Re-inizializziamo lo stato base per sicurezza
+    st.session_state.step = 1
+    st.session_state.detected_cards = []
+    st.session_state.manual_added_cards = []
+    st.session_state.question_text = ""
+    
     st.rerun()
 
 # --- STEP 1: Input Domanda ---
@@ -213,62 +270,44 @@ if st.session_state.step == 1:
         height=150
     )
     
-    # Opzione per disabilitare l'IA
-    use_ai = st.checkbox("🕵️ Attiva riconoscimento automatico carte dal testo", value=True, help="Se disattivato, verranno usate SOLO le carte selezionate manualmente sopra.")
-
     if st.button("Analizza Scenario 🔍", type="primary"):
-        if not question_input and not manual_selection:
-            st.warning("Scrivi una domanda o seleziona almeno una carta.")
+        if not manual_selection:
+            st.warning("Per favore seleziona almeno una carta dalla lista.")
         else:
             st.session_state.question_text = question_input
             st.session_state.manual_added_cards = manual_selection
             
-            with st.spinner("Analisi in corso..."):
-                if question_input and use_ai:
-                    extracted = extract_cards(model, question_input)
-                else:
-                    extracted = []
-                
-                # Uniamo le carte trovate dall'IA con quelle selezionate a mano (evitando duplicati)
-                combined_cards = list(set(extracted + manual_selection))
-                
-                st.session_state.detected_cards = combined_cards
-                st.session_state.step = 2
-                st.rerun()
+            # Modalità strettamente manuale: usiamo solo le carte selezionate
+            st.session_state.detected_cards = list(set(manual_selection))
+            st.session_state.step = 2
+            st.rerun()
 
 # --- STEP 2: Verifica Carte ---
 elif st.session_state.step == 2:
-    st.info("✅ Analisi completata. Conferma la lista delle carte.")
+    st.info("✅ Carte confermate. Procedi al verdetto.")
     if st.session_state.question_text:
         st.write(f"**Scenario:** *{st.session_state.question_text}*")
     
     st.divider()
     st.subheader("🛠 Busta Carte")
-    st.caption("Ecco le carte che verranno analizzate. Modifica i nomi se l'IA ha sbagliato.")
-
-    # Gestione dinamica lista carte
+    
+    # (Resto del codice di UI carte...) 
+    # Manteniamo la logica di visualizzazione ma senza "correzioni AI"
     final_cards_list = []
     
-    # Mostra input per ogni carta trovata
     for i, card in enumerate(st.session_state.detected_cards):
-        # Layout a colonne: Immagine - Input
         col_img, col_input = st.columns([0.2, 0.8])
-        
-        # Recuperiamo info al volo per l'immagine
         preview_data = get_card_data(card)
-        
         with col_img:
             if preview_data and "card_images" in preview_data:
                 st.image(preview_data["card_images"][0]["image_url_small"], width=80)
             else:
                 st.write("🖼️ N/A")
-                
         with col_input:
            new_name = st.text_input(f"Carta #{i+1}", value=card, key=f"card_{i}", label_visibility="collapsed")
            if new_name.strip():
                final_cards_list.append(new_name)
 
-    # Bottone per aggiungere carta manuale (extra fallback)
     col_add1, col_add2 = st.columns([0.85, 0.15])
     with col_add1:
         extra_add = st.multiselect("Aggiungi altre carte:", options=all_card_names, key="step2_multiselect")
@@ -283,17 +322,17 @@ elif st.session_state.step == 2:
             
     with col_b2:
         if st.button("Conferma e Giudica 👨‍⚖️", type="primary"):
-            # Aggiungi le carte extra selezionate nello step 2
             full_list = final_cards_list + extra_add
-            # Rimuovi duplicati e stringhe vuote
             clean_list = list(set([c.strip() for c in full_list if c.strip()]))
-            
             st.session_state.detected_cards = clean_list
             st.session_state.step = 3
             st.rerun()
 
 # --- STEP 3: Verdetto ---
 elif st.session_state.step == 3:
+    # (Resto del codice...)
+    # Aggiornamento Prompt PIGNOLO
+    
     st.subheader("⚖️ Verdetto del Giudice")
     
     found_cards_data = []
@@ -304,13 +343,9 @@ elif st.session_state.step == 3:
         progress_bar = st.progress(0)
         total_cards = len(st.session_state.detected_cards)
         
-        if total_cards == 0:
-            st.warning("Nessuna carta selezionata. Procedo con le regole generali.")
-            
         for idx, card_name in enumerate(st.session_state.detected_cards):
             st.write(f"🔍 Cerco: **{card_name}**...")
             card_data = get_card_data(card_name)
-            
             if card_data:
                 found_cards_data.append(card_data)
                 cards_context += f"NOME UFFICIALE: {card_data['name']}\nTESTO AGGIORNATO: {card_data['desc']}\n\n"
@@ -318,18 +353,18 @@ elif st.session_state.step == 3:
             else:
                 missing_cards.append(card_name)
                 st.error(f"❌ Non trovata: {card_name}")
-            
-            if total_cards > 0:
-                progress_bar.progress((idx + 1) / total_cards)
+            if total_cards > 0: progress_bar.progress((idx + 1) / total_cards)
     
-    # Se ci sono carte non trovate, avvisa ma procedi
-    if missing_cards:
-        st.warning(f"Attenzione: Non ho trovato i testi ufficiali per: {', '.join(missing_cards)}. Il verdetto potrebbe essere meno preciso.")
-
-    # Generazione Verdetto
     with st.spinner("Generazione verdetto in corso..."):
         prompt_ruling = f"""
-        Sei un Giudice Ufficiale di Yu-Gi-Oh. Emetti un ruling basato sul regolamento.
+        Sei un **HEAD JUDGE UFFICIALE DI YU-GI-OH** (Livello 3).
+        Il tuo compito è emettere ruling tecnici estremamente precisi e pignoli.
+
+        REGOLAMENTO CRITICO:
+        - **Damage Step**: Sii ESTREMAMENTE severo. Solo carte che modificano direttamente ATK/DEF, Counter Traps, o effetti che negano specificamente *l'attivazione* (non l'effetto) possono essere attivate qui (salvo eccezioni esplicite).
+        - **Esempio Pignolo**: "Ash Blossom & Joyous Spring" NEGA L'EFFETTO, NON l'attivazione. Quindi NON PUÒ quasi mai essere usata nel Damage Step. Se l'utente chiede questo, devi dire di NO e spiegare brutalmente perché.
+        - **Conjunctions**: Fai attenzione a "E", "ANCHE SE", "POI".
+        - **Spell Speed**: Rispetta rigorosamente le velocità di attivazione.
 
         TESTI UFFICIALI (Fonte di Verità):
         ---
@@ -340,23 +375,21 @@ elif st.session_state.step == 3:
         "{st.session_state.question_text}"
 
         ISTRUZIONI:
-        1. Analizza lo scenario e i testi.
-        2. Applica le Regole Ufficiali (Damage Step, Chain, Targeting, etc.).
-        3. Spiega il verdetto.
+        1. Analizza lo scenario cercando cavilli legali.
+        2. Se la mossa è illegale, dillo chiaramente.
+        3. Usa terminologia ufficiale (Activation, Resolution, SEGOC, Turn Player Priority).
         
         FORMATO RISPOSTA RICHIESTO:
         Devi dividere la risposta in due parti separate da una riga con scritto esattamente "---DETTAGLI---".
         
         Parte 1 (Prima di ---DETTAGLI---):
-        - Risposta diretta e concisa (es: "Sì, [Carta X] nega [Carta Y]").
-        - Una breve spiegazione di 2-3 frasi massimo.
+        - Risposta diretta e concisa (es: "Sì, [Carta X] nega [Carta Y]" oppure "No, mossa illegale").
         
         ---DETTAGLI---
         
         Parte 2 (Dopo ---DETTAGLI---):
-        - Spiegazione tecnica approfondita.
-        -cita le catene (Chain Links), Spell Speeds, e meccaniche specifiche.
-        - Riferimenti precisi al testo delle carte.
+        - Analisi tecnica step-by-step.
+        - Cita le regole del Damage Step se rilevante.
         """
         
         response = get_gemini_response(model, prompt_ruling)
