@@ -170,11 +170,13 @@ def resolve_working_model():
     for model_name in candidate_models:
         try:
             model = genai.GenerativeModel(model_name)
+            # VALIDATION CALL: Force an API request to ensure access
+            model.count_tokens("test")
             return model, model_name
         except Exception:
             continue
             
-    return genai.GenerativeModel("gemini-2.5-flash"), "gemini-2.5-flash (Default)"
+    return genai.GenerativeModel("gemini-1.5-flash"), "gemini-1.5-flash (Default)"
 
 # --- Gestione Autenticazione ---
 def load_keys():
