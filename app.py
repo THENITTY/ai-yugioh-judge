@@ -603,6 +603,8 @@ A: When Mirrorjade's effect resolves, you must attempt to banish a monster on th
                                         else:
                                             # Single card context
                                             found_rulings.append(f"**{card_name}**:\n{text}")
+                                    else:
+                                        print(f"DEBUG: Scraper returned None for {card_name}")
                                             
                                 except Exception as e:
                                     print(f"Skip {card_name}: {e}")
@@ -615,7 +617,22 @@ A: When Mirrorjade's effect resolves, you must attempt to banish a monster on th
                                  st.code(final_text, language="text")
                                  st.toast("Ruling trovati! Valuta se cambia il verdetto.")
                              else:
-                                 st.warning(f"Nessun ruling specifico incrociato trovato per le carte: {', '.join([c['name'] for c in cards_to_check])}.")
+                                 st.warning(f"Nessun ruling specifico incrociato trovato per: {', '.join([c['name'] for c in cards_to_check])}.")
+                                 
+                                 # DEBUG AREA - Only shown on failure
+                                 with st.expander("🐛 Debug Data (Clicca se non trovi nulla)"):
+                                     st.write("Dati estratti dal scraper:")
+                                     st.write(f"- Carte cercate: {all_card_names_simple}")
+                                     st.write(f"- Metodo Scraper Reloaded: {'search_ygoresources_ruling' in dir(scraper)}")
+                                     # Force run one search to show raw content for debug
+                                     test_name = cards_to_check[0]["name"]
+                                     st.write(f"- Test Raw Dump per '{test_name}':")
+                                     try:
+                                          raw = scraper.search_ygoresources_ruling(test_name)
+                                          st.text(raw if raw else "None returned")
+                                     except Exception as ex:
+                                          st.error(str(ex))
+                                     
                     else:
                          st.warning("Nessuna carta identificata per la ricerca. Riprova a formulare la domanda.")
 
