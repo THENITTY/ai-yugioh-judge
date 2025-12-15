@@ -402,6 +402,7 @@ if mode == "👨‍⚖️ AI Judge":
                 st.session_state.detected_cards = clean_list
                 st.session_state.step = 3
                 st.rerun()
+
     # --- STEP 3: Verdetto ---
     elif st.session_state.step == 3:
         st.subheader("⚖️ Verdetto del Giudice")
@@ -430,17 +431,15 @@ if mode == "👨‍⚖️ AI Judge":
                     progress_bar.progress((idx + 1) / total_cards)
         
         with st.spinner("Generazione verdetto in corso..."):
-            
-            # USE STANDARD RESOLVED MODEL (No experimentation)
-            judge_model, model_name = resolve_working_model()
-
             prompt_ruling = f"""
             Sei un **HEAD JUDGE UFFICIALE DI YU-GI-OH** (Livello 3).
             Il tuo compito è emettere ruling tecnici estremamente precisi e pignoli.
     
             REGOLAMENTO CRITICO:
-            - **Damage Step**: Sii ESTREMAMENTE severo. Solo carte che modificano direttamente ATK/DEF, Counter Traps, o effetti che negano specificamente *l'attivazione* (non l'effetto) possono essere attivate qui.
-            - **Condizioni di Gioco (Game State)**: Verifica sempre se l'azione è permessa dallo stato attuale del gioco (es. numero massimo di mostri, carte "You can only control 1", ecc.).
+            - **Damage Step**: Sii ESTREMAMENTE severo. Solo carte che modificano direttamente ATK/DEF, Counter Traps, o effetti che negano specificamente *l'attivazione* (non l'effetto) possono essere attivate qui (salvo eccezioni esplicite).
+            - **Esempio Pignolo**: "Ash Blossom & Joyous Spring" NEGA L'EFFETTO, NON l'attivazione. Quindi NON PUÒ quasi mai essere usata nel Damage Step. Se l'utente chiede questo, devi dire di NO e spiegare brutalmente perché.
+            - **Conjunctions**: Fai attenzione a "E", "ANCHE SE", "POI".
+            - **Spell Speed**: Rispetta rigorosamente le velocità di attivazione.
     
             TESTI UFFICIALI (Fonte di Verità):
             ---
@@ -449,40 +448,38 @@ if mode == "👨‍⚖️ AI Judge":
     
             SCENARIO UTENTE:
             "{st.session_state.question_text}"
-            
+    
             ISTRUZIONI:
             1. Analizza lo scenario cercando cavilli legali.
             2. Se la mossa è illegale, dillo chiaramente.
-            3. RAGIONA PASSO-PASSO prima di rispondere.
+            3. Usa terminologia ufficiale (Activation, Resolution, SEGOC, Turn Player Priority).
             
             FORMATO RISPOSTA RICHIESTO:
             Devi dividere la risposta in due parti separate da una riga con scritto esattamente "---DETTAGLI---".
             
             Parte 1 (Prima di ---DETTAGLI---):
-            - Risposta diretta e concisa (es: "Sì, legale" oppure "No, mossa illegale").
+            - Risposta diretta e concisa (es: "Sì, [Carta X] nega [Carta Y]" oppure "No, mossa illegale").
             
             ---DETTAGLI---
             
             Parte 2 (Dopo ---DETTAGLI---):
             - Analisi tecnica step-by-step.
+            - Cita le regole del Damage Step se rilevante.
             """
             
-            try:
-                response = get_gemini_response(judge_model, prompt_ruling)
-                
-                if "---DETTAGLI---" in response:
-                    short_answer, deep_dive = response.split("---DETTAGLI---")
-                else:
-                    short_answer = response
-                    deep_dive = "Nessun dettaglio tecnico aggiuntivo fornito."
-        
-                st.success(f"Verdetto Rapido (Model: {model_name}):")
-                st.markdown(short_answer)
-                
-                with st.expander("🧐 Spiegazione Tecnica Approfondita"):
-                    st.markdown(deep_dive.strip())
-            except Exception as e:
-                st.error(f"Errore generazione: {e}")
+            response = get_gemini_response(model, prompt_ruling)
+            
+            if "---DETTAGLI---" in response:
+                short_answer, deep_dive = response.split("---DETTAGLI---")
+            else:
+                short_answer = response
+                deep_dive = "Nessun dettaglio tecnico aggiuntivo fornito."
+    
+            st.success("Verdetto Rapido:")
+            st.markdown(short_answer)
+            
+            with st.expander("🧐 Spiegazione Tecnica Approfondita"):
+                st.markdown(deep_dive.strip())
             
         if st.button("Nuova Domanda 🔄"):
             reset_judge()
