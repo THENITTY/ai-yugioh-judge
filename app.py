@@ -161,17 +161,13 @@ def get_card_data(card_name):
 def resolve_working_model():
     """Tenta automaticamente di trovare un modello funzionante."""
     candidate_models = [
-        "gemini-1.5-pro",
         "gemini-1.5-flash",
-        "gemini-2.0-flash-exp",
-        "gemini-pro",
+        "gemini-1.5-flash-latest",
     ]
     
     for model_name in candidate_models:
         try:
             model = genai.GenerativeModel(model_name)
-            # VALIDATION CALL: Force an API request to ensure access
-            model.count_tokens("test")
             return model, model_name
         except Exception:
             continue
@@ -406,9 +402,6 @@ if mode == "👨‍⚖️ AI Judge":
     elif st.session_state.step == 3:
         st.subheader("⚖️ Verdetto del Giudice")
         
-        # SMART MODE TOGGLE
-        use_smart_judge = st.toggle("🧠 Modalità Avanzata (Ricerca Web + Rulings)", value=True, help="Usa Google Search per verificare ruling ufficiali. Più lento ma preciso.")
-
         found_cards_data = []
         cards_context = ""
         missing_cards = []
@@ -434,17 +427,17 @@ if mode == "👨‍⚖️ AI Judge":
         
         with st.spinner("Generazione verdetto in corso..."):
             
-            # STRATEGIA DI PROMPT
+            # USE STANDARD RESOLVED MODEL (No experimentation)
+            judge_model, model_name = resolve_working_model()
+
             prompt_ruling = f"""
             Sei un **HEAD JUDGE UFFICIALE DI YU-GI-OH** (Livello 3).
-            Il tuo compito è emettere ruling tecnici estremamente precisi.
-
-            {"ISTRUZIONE SPECIALE: USA GOOGLE SEARCH PER CERCARE RULING UFFICIALI (es. 'Mirrorjade ruling control 1', 'Mind Control ruling'). Citale se trovate." if use_smart_judge else ""}
+            Il tuo compito è emettere ruling tecnici estremamente precisi e pignoli.
     
             REGOLAMENTO CRITICO:
-            - **Damage Step**: Sii ESTREMAMENTE severo.
-            - **Condizioni di Attivazione**: Verifica se l'attivazione è legale PRIMA della risoluzione.
-            - **Search**: Se usi i tool di ricerca, verifica fonti come 'db.yugioh-card.com' o 'Yugipedia'.
+            - **Damage Step**: Sii ESTREMAMENTE severo. Solo carte che modificano direttamente ATK/DEF, Counter Traps, o effetti che negano specificamente *l'attivazione* (non l'effetto) possono essere attivate qui.
+            - **Condizioni di Gioco (Game State)**: Se una carta ha restrizioni (es. "You can only control 1"), NON puoi attivare effetti che violerebbero quella restrizione al momento della risoluzione. (Es. Mind Control su un mostro che già controlli o di cui hai già una copia se limitata).
+            - **Esempio Mind Control**: Se controlli "Mirrorjade" e l'avversario ha "Mirrorjade", e Mirrorjade dice "You can only control 1", NON puoi attivare Mind Control sul Mirrorjade avversario, perché alla risoluzione controlleresti 2 copie. È una mossa illegale.
     
             TESTI UFFICIALI (Fonte di Verità):
             ---
@@ -457,7 +450,7 @@ if mode == "👨‍⚖️ AI Judge":
             ISTRUZIONI:
             1. Analizza lo scenario cercando cavilli legali.
             2. Se la mossa è illegale, dillo chiaramente.
-            3. Usa terminologia ufficiale.
+            3. RAGIONA PASSO-PASSO prima di rispondere.
             
             FORMATO RISPOSTA RICHIESTO:
             Devi dividere la risposta in due parti separate da una riga con scritto esattamente "---DETTAGLI---".
@@ -469,72 +462,24 @@ if mode == "👨‍⚖️ AI Judge":
             
             Parte 2 (Dopo ---DETTAGLI---):
             - Analisi tecnica step-by-step.
-            - Citazione Rulings (se trovate).
             """
-
-            # ROBUST GENERATION LOOP
-            # Tenta Pro -> Flash (Smart) -> Fallback (Resolved)
-            strategies = []
             
-            # 1. Smart Strategies (with Tools)
-            if use_smart_judge:
-                strategies.append(("gemini-1.5-pro", 'google_search_retrieval'))
-                strategies.append(("gemini-1.5-flash", 'google_search_retrieval'))
-            
-            # 2. Dynamic Fallback Strategy
-            # Use the model that is GUARANTEED to work (checked at startup)
-            working_model, working_name = resolve_working_model()
-            # We wrap it in a tuple format compatible with the loop, or handle it specially
-            strategies.append((working_model, None)) 
-            
-            response_text = ""
-            success = False
-            last_error = None
-
-            for strategy in strategies:
-                try:
-                    # Parse Strategy
-                    if isinstance(strategy[0], str):
-                        # It's a name + tools tuple
-                        model_name = strategy[0]
-                        tools_conf = strategy[1]
-                        if tools_conf:
-                            model = genai.GenerativeModel(model_name, tools=tools_conf)
-                        else:
-                            model = genai.GenerativeModel(model_name)
-                    else:
-                        # It's an already instantiated model object (fallback)
-                        model = strategy[0]
-                        model_name = "Default Fallback"
-                    
-                    # Attempt Generation
-                    # Note: resolve_working_model returns a model that MIGHT fail on generation if tools are mismatched?
-                    # The fallback model has NO tools configured, so it should be safe.
-                    
-                    response_obj = model.generate_content(prompt_ruling)
-                    response_text = response_obj.text
-                    success = True
-                    st.toast(f"✅ Generato con successo ({model_name})")
-                    break # Success!
-                except Exception as e:
-                    last_error = e
-                    continue # Try next strategy
-            
-            if not success:
-                st.error(f"Errore Critico Generazione: {last_error}")
-                response_text = f"Errore: Impossibile generare verdetto. Dettaglio: {last_error}"
-            
-            if "---DETTAGLI---" in response_text:
-                short_answer, deep_dive = response_text.split("---DETTAGLI---")
-            else:
-                short_answer = response_text
-                deep_dive = "Nessun dettaglio tecnico aggiuntivo fornito."
-    
-            st.success("Verdetto Rapido:")
-            st.markdown(short_answer)
-            
-            with st.expander("🧐 Spiegazione Tecnica Approfondita"):
-                st.markdown(deep_dive.strip())
+            try:
+                response = get_gemini_response(judge_model, prompt_ruling)
+                
+                if "---DETTAGLI---" in response:
+                    short_answer, deep_dive = response.split("---DETTAGLI---")
+                else:
+                    short_answer = response
+                    deep_dive = "Nessun dettaglio tecnico aggiuntivo fornito."
+        
+                st.success(f"Verdetto Rapido (Model: {model_name}):")
+                st.markdown(short_answer)
+                
+                with st.expander("🧐 Spiegazione Tecnica Approfondita"):
+                    st.markdown(deep_dive.strip())
+            except Exception as e:
+                st.error(f"Errore generazione: {e}")
             
         if st.button("Nuova Domanda 🔄"):
             reset_judge()
