@@ -602,18 +602,21 @@ A: When Mirrorjade's effect resolves, you must attempt to banish a monster on th
                                      st.write(f"- Carte cercate: {all_card_names_simple}")
                                      st.write(f"- Metodo Scraper Reloaded: {'search_ygoresources_ruling' in dir(scraper)}")
                                      
-                                     test_name = cards_to_check[0]["name"]
-                                     st.write(f"- Test Run per '{test_name}':")
-                                     try:
-                                          # Use the log captured during loop if available, else re-run
-                                          if 'debug_log_res' in locals():
-                                               st.text(debug_log_res)
-                                          else:
-                                               # Re-run if we didn't capture the log (e.g. exception before call)
+                                     # Display the log from the LAST attempt (which likely failed or was empty)
+                                     if 'debug_log_res' in locals():
+                                          # Try to infer which card this log belongs to by looking at the log content?
+                                          # Or just generic label.
+                                          st.write(f"- Ultimo Log di Esecuzione:")
+                                          st.text(debug_log_res)
+                                     else:
+                                          # Fallback: Force run test on first card
+                                          test_name = cards_to_check[0]["name"]
+                                          st.write(f"- Test Run Forzato per '{test_name}':")
+                                          try:
                                                _, fresh_log = scraper.search_ygoresources_ruling(test_name)
                                                st.text(fresh_log)
-                                     except Exception as ex:
-                                          st.error(str(ex))
+                                          except Exception as ex:
+                                               st.error(str(ex))
                                      
                     else:
                          st.warning("Nessuna carta identificata per la ricerca. Riprova a formulare la domanda.")

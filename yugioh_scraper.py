@@ -699,14 +699,33 @@ class YuGiOhMetaScraper:
                 )
                 page = context.new_page()
 
-                logs.append("Navigating with Viewport 1280x720...")
+                logs.append("Navigating to Search Home...")
                 try:
-                    page.goto(search_url, timeout=45000, wait_until="domcontentloaded")
-                    # Wait for ANY content to appear (heuristic: body length > 100)
+                    # Strategy Change: Go to search page and TYPE.
+                    # Direct deep links seem to fail hydration for long queries in headless.
+                    page.goto("https://db.ygoresources.com/search", timeout=30000)
+                    page.wait_for_load_state("domcontentloaded")
+                    
+                    # 1. Type Query
+                    logs.append("Typing query...")
+                    # Try to find the main search input
+                    # Usually input[placeholder="Search..."] or just input
+                    try:
+                        page.wait_for_selector("input", state="visible", timeout=10000)
+                        page.fill("input", card_name)
+                        page.press("input", "Enter")
+                        logs.append("Search submitted via Enter.")
+                        time.sleep(3) # Wait for router
+                    except Exception as type_err:
+                        logs.append(f"Input Error: {type_err}")
+                        # Fallback to direct link if input fails
+                        page.goto(search_url, timeout=30000)
+
+                    # 2. Wait for Results (Body expansion)
                     for i in range(10):
                         time.sleep(1)
-                        if len(page.inner_text("body")) > 100:
-                            logs.append(f"Content loaded (iter {i}).")
+                        if len(page.inner_text("body")) > 200:
+                            logs.append(f"Content hydrated (iter {i}).")
                             break
                 except Exception as nav_e:
                     logs.append(f"Nav Error: {nav_e}")
@@ -714,18 +733,25 @@ class YuGiOhMetaScraper:
                 logs.append(f"Current URL: {page.url}")
                 logs.append(f"Page Title: {page.title()}")
 
-                # 1. Handle Navigation / Clicking
+                # 3. Handle Navigation / Clicking (Pick Result)
                 try:
-                    time.sleep(2) 
+                    time.sleep(1) 
                     
-                    if "/card#" in page.url or "Card Database" in page.title():
-                        # We might be on the list OR the card.
-                        # Try to find the exact card name link
-                        logs.append("Attempting to find card link by text...")
+                    if "/card#" in page.url:
+                         logs.append("Landed on card page via redirection.")
+                    else:
+                        logs.append("Browsing results list...")
+                        # Try to click the specific card
                         try:
-                            # Robust Text Click
-                            page.get_by_text(card_name, exact=False).first.click(timeout=3000)
-                            logs.append(f"Clicked text '{card_name}'.")
+                            # Use exact=True first for high precision
+                            link = page.get_by_text(card_name, exact=True)
+                            if link.count() > 0:
+                                link.first.click()
+                                logs.append(f"Clicked exact text '{card_name}'.")
+                            else:
+                                # Fallback to fuzzy
+                                page.get_by_text(card_name, exact=False).first.click(timeout=3000)
+                                logs.append(f"Clicked fuzzy text '{card_name}'.")
                             time.sleep(3)
                         except:
                             # Fallback to CSS
@@ -739,14 +765,14 @@ class YuGiOhMetaScraper:
                 except Exception as click_err:
                     logs.append(f"Click logic warning: {click_err}")
 
-                # 2. Extract Text
+                # 4. Extract Text
                 logs.append("Extracting body text...")
                 full_text = page.inner_text("body")
                 logs.append(f"Body Length: {len(full_text)}")
                 
                 # Debug Dump if small
                 if len(full_text) < 200:
-                     logs.append(f"LOW CONTENT WARNING. Dump: {full_text}")                
+                     logs.append(f"LOW CONTENT WARNING. Dump: {full_text[:300]}")                
                 if not full_text:
                     browser.close()
                     return None, "\n".join(logs)
