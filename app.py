@@ -552,7 +552,13 @@ A: When Mirrorjade's effect resolves, you must attempt to banish a monster on th
                                 
                                 try:
                                     # Modified Scraper returns (text, log) tuple
-                                    text_res, debug_log_res = scraper.search_ygoresources_ruling(card_name)
+                                    # Pass other cards as keywords for Deep Clicking
+                                    other_cards_simple = [n for n in all_card_names_simple if n != card_simple]
+                                    
+                                    text_res, debug_log_res = scraper.search_ygoresources_ruling(
+                                        card_name, 
+                                        cross_ref_keywords=other_cards_simple if len(cards_to_check) > 1 else None
+                                    )
                                     
                                     if text_res:
                                         # 4. CROSS-REFERENCE FILTERING

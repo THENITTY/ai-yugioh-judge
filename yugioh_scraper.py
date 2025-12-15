@@ -671,9 +671,12 @@ class YuGiOhMetaScraper:
         except Exception as e:
             return f"Error parsing deck: {e}"
 
-    def search_ygoresources_ruling(self, card_name):
+    def search_ygoresources_ruling(self, card_name, cross_ref_keywords=None):
         """
-        Searches db.ygoresources.com for a card and extracts its rulings.
+        Searches db.ygoresources.com for a card.
+        If cross_ref_keywords (list) is provided:
+           - Tries to click a link on the card page matching one of the keywords.
+           - Returns content of that specific Q&A page.
         Returns (text, debug_log_string).
         """
         from playwright.sync_api import sync_playwright
@@ -683,7 +686,7 @@ class YuGiOhMetaScraper:
         encoded_name = urllib.parse.quote(card_name)
         search_url = f"https://db.ygoresources.com/search?name={encoded_name}&view=card"
         
-        logs = [f"Init Search: {card_name}", f"URL: {search_url}"]
+        logs = [f"Init Search: {card_name}", f"Keywords: {cross_ref_keywords}"]
 
         try:
             with sync_playwright() as p:
@@ -692,7 +695,6 @@ class YuGiOhMetaScraper:
                     args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-blink-features=AutomationControlled"]
                 )
                 
-                # IMPORTANT: Set Viewport to generic Desktop to avoid mobile layout/hidden elements
                 context = browser.new_context(
                     viewport={"width": 1280, "height": 720},
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
@@ -701,27 +703,22 @@ class YuGiOhMetaScraper:
 
                 logs.append("Navigating to Search Home...")
                 try:
-                    # Strategy Change: Go to search page and TYPE.
-                    # Direct deep links seem to fail hydration for long queries in headless.
                     page.goto("https://db.ygoresources.com/search", timeout=30000)
                     page.wait_for_load_state("domcontentloaded")
                     
                     # 1. Type Query
-                    logs.append("Typing query...")
-                    # Try to find the main search input
-                    # Usually input[placeholder="Search..."] or just input
+                    logs.append(f"Typing query '{card_name}'...")
                     try:
                         page.wait_for_selector("input", state="visible", timeout=10000)
                         page.fill("input", card_name)
                         page.press("input", "Enter")
-                        logs.append("Search submitted via Enter.")
-                        time.sleep(3) # Wait for router
+                        logs.append("Search submitted.")
+                        time.sleep(3) 
                     except Exception as type_err:
                         logs.append(f"Input Error: {type_err}")
-                        # Fallback to direct link if input fails
                         page.goto(search_url, timeout=30000)
 
-                    # 2. Wait for Results (Body expansion)
+                    # 2. Wait for Results
                     for i in range(10):
                         time.sleep(1)
                         if len(page.inner_text("body")) > 200:
@@ -730,94 +727,88 @@ class YuGiOhMetaScraper:
                 except Exception as nav_e:
                     logs.append(f"Nav Error: {nav_e}")
                 
-                logs.append(f"Current URL: {page.url}")
-                logs.append(f"Page Title: {page.title()}")
+                logs.append(f"URL: {page.url}")
 
-                # 3. Handle Navigation / Clicking (Pick Result)
+                # 3. Pick Result
                 try:
                     time.sleep(1) 
-                    
                     if "/card#" in page.url:
-                         logs.append("Landed on card page via redirection.")
+                         logs.append("Redirected to card page.")
                     else:
-                        logs.append("Browsing results list...")
-                        # Try to click the specific card
+                        logs.append("Picking card from list...")
                         try:
-                            # 1. Exact Text Match
                             link = page.get_by_text(card_name, exact=True)
                             if link.count() > 0:
                                 link.first.click()
-                                logs.append(f"Clicked exact text '{card_name}'.")
+                                logs.append("Clicked exact.")
                             else:
-                                # 2. Fuzzy Text Match
-                                link_fuzzy = page.get_by_text(card_name, exact=False)
-                                if link_fuzzy.count() > 0:
-                                    link_fuzzy.first.click()
-                                    logs.append(f"Clicked fuzzy text '{card_name}'.")
-                                else:
-                                    # 3. BLIND FALLBACK: Click the first link that looks like a card
-                                    # This is crucial if name formatting differs (e.g. "Monster" tag)
-                                    logs.append("Text match failed. Attempting blind click on first result...")
-                                    page.locator("a[href^='/card']").first.click()
-                                    logs.append("Clicked first available card link.")
-                            
+                                page.locator("a[href^='/card']").first.click()
+                                logs.append("Clicked first fallback.")
                             time.sleep(3)
                         except Exception as pick_err:
-                            logs.append(f"Result Picking Error: {pick_err}")
-                            # Last ditch: dump the HTML of the list to see what went wrong
-                            # logs.append(page.content()[:500])
+                            logs.append(f"Pick Error: {pick_err}")
 
                 except Exception as click_err:
-                    logs.append(f"Click logic warning: {click_err}")
+                    logs.append(f"Click warning: {click_err}")
 
-                # 4. Extract Text
-                logs.append("Extracting body text...")
+                # 4. DEEP CLICKING (Cross-Reference Support)
+                if cross_ref_keywords:
+                    logs.append(f"Attempting Deep Click for keywords: {cross_ref_keywords}...")
+                    try:
+                        for keyword in cross_ref_keywords:
+                            # Try to find a link containing the keyword
+                            # The keyword might be inside a Question text which is a link?
+                            # Or a card link inside the text.
+                            # We want to click IT to go to the Q&A specific page.
+                            
+                            # Searching for 'keyword'
+                            deep_link = page.get_by_text(keyword, exact=False)
+                            if deep_link.count() > 0:
+                                logs.append(f"Found deep keyword '{keyword}'. Clicking...")
+                                deep_link.first.click()
+                                time.sleep(3)
+                                logs.append(f"Deep Click Success. New URL: {page.url}")
+                                break # Stop after first successful deep click
+                            else:
+                                logs.append(f"Keyword '{keyword}' not found on card page.")
+                    except Exception as deep_err:
+                         logs.append(f"Deep Click Error: {deep_err}")
+
+                # 5. Extract Text (Final Page)
+                logs.append("Extracting final content...")
                 full_text = page.inner_text("body")
-                logs.append(f"Body Length: {len(full_text)}")
+                logs.append(f"Final Body Len: {len(full_text)}")
                 
-                # Debug Dump if small
                 if len(full_text) < 200:
-                     logs.append(f"LOW CONTENT WARNING. Dump: {full_text[:300]}")                
+                     logs.append(f"Dump: {full_text[:300]}")
+                
                 if not full_text:
                     browser.close()
                     return None, "\n".join(logs)
                 
-                start_capture = False
-                lines = full_text.split('\n')
-                qa_lines = []
+                # Cleanup Text
+                clean_lines = []
+                # Simple extraction of distinct non-empty lines
+                # If we are on a specific Q&A page, checking for Q/A prefix is good
+                # If on Card Page, we want list.
+                # Let's just return broadly relevant lines.
                 
-                # Context Window Strategy
-                capture_countdown = 0
+                lines = full_text.split('\n')
+                qa_section_active = False # Heuristic 
                 
                 for line in lines:
                     line = line.strip()
-                    if not line: continue
-                    if len(line) < 5: continue 
+                    if len(line) < 5: continue
                     
-                    is_relevant = ("Question" in line) or ("Q:" in line) or (card_name.lower() in line.lower()) or ("activate" in line.lower())
+                    # Capture strategy: 
+                    # If on Q&A page, "Question" "Answer" usually present.
+                    # Capture everything if we did a deep click?
+                    # Yes, if we deep clicked, we likely want the whole Q/A block.
                     
-                    if is_relevant:
-                        qa_lines.append(f"- {line}")
-                        capture_countdown = 3 
-                    elif capture_countdown > 0:
-                        qa_lines.append(f"  {line}")
-                        capture_countdown -= 1
-                
+                    clean_lines.append(f"{line}")
+
                 browser.close()
-                logs.append(f"Extracted {len(qa_lines)} relevant lines.")
-                
-                if len(qa_lines) > 0:
-                    # Dedup
-                    seen = set()
-                    final_lines = []
-                    for l in qa_lines:
-                        if l not in seen:
-                            final_lines.append(l)
-                            seen.add(l)
-                    return "\n".join(final_lines[:30]), "\n".join(logs)
-                else:
-                    logs.append("No relevant lines found in body.")
-                    return None, "\n".join(logs)
+                return "\n".join(clean_lines[:50]), "\n".join(logs) # Return valid chunk
 
         except Exception as e:
             logs.append(f"Critical Error: {e}")
