@@ -319,6 +319,13 @@ if mode == "👨‍⚖️ AI Judge":
         st.session_state.detected_cards = []
         st.session_state.manual_added_cards = []
         st.session_state.question_text = ""
+        
+        # Reset Chat & Persistence
+        st.session_state.judge_chat_history = []
+        st.session_state.verdict_ready = False
+        st.session_state.verdict_short = ""
+        st.session_state.verdict_deep = ""
+        
         st.rerun()
 
     # --- STEP 1: Input Domanda ---
@@ -433,72 +440,82 @@ if mode == "👨‍⚖️ AI Judge":
         # PERSIST DATA FOR BUTTONS
         st.session_state.found_cards_cache = found_cards_data      
 
-        with st.spinner("Generazione verdetto in corso..."):
-            
-            # USE STANDARD RESOLVED MODEL
-            judge_model, model_name = resolve_working_model()
-
-            # RULING UFFICIALI AGGIUNTIVE (YGOProDeck / Konami Database)
-            # Inserito manualmente per gestire casi complessi come Mind Control vs Mirrorjade
-            extra_rulings_db = """
-Q: Both players control a face-up Mirrorjade the Iceblade Dragon. Can I activate Mind Control targeting my opponent's copy of Mirrorjade? If yes, what happens when it resolves?
-A: You can activate Mind Control. If you still control a face-up Mirrorjade when Mind Control resolves, you take control of your opponent's Mirrorjade, and it is then immediately destroyed.
-            
-Q: I control a face-up Mirrorjade the Iceblade Dragon. Can I use Polymerization to Fusion Summon another copy of Mirrorjade the Iceblade Dragon, using the copy on my field as material?
-A: No, you cannot. You can only control 1 face-up "Mirrorjade the Iceblade Dragon", and cannot attempt to Summon another copy if you already do.
-
-Q: If Mirrorjade's Quick Effect is negated, or its activation is negated, can that Mirrorjade use that effect again the next turn?
-A: Yes. This card cannot use this effect next turn is part of Mirrorjade's effect. If Mirrorjade's effect, or its activation, is negated, the entire effect is not applied, including that part.
-
-Q: I activate Mirrorjade's Quick Effect. In response, the effect of my opponent's Destiny HERO - Destroyer Phoenix Enforcer resolves, destroying both it and another card on my field. If Mirrorjade is the only monster on the field when its Quick Effect resolves, what happens?
-A: When Mirrorjade's effect resolves, you must attempt to banish a monster on the field. If Mirrorjade is the only monster on the field that you can attempt to banish, you must banish Mirrorjade itself.
-"""
-
-            prompt_ruling = f"""
-            Sei un **HEAD JUDGE UFFICIALE DI YU-GI-OH** (Livello 3).
-            Il tuo compito è emettere ruling tecnici estremamente precisi e pignoli.
-    
-            REGOLAMENTO CRITICO:
-            - **Damage Step**: Sii ESTREMAMENTE severo. Solo carte che modificano direttamente ATK/DEF, Counter Traps, o effetti che negano specificamente *l'attivazione* (non l'effetto) possono essere attivate qui.
-            - **Condizioni di Gioco (Game State)**: Verifica sempre se l'azione è permessa dallo stato attuale del gioco.
-    
-            TESTI UFFICIALI (Fonte di Verità):
-            ---
-            {cards_context}
-            ---
-            
-            DATABASE RULING EXTRA (PRECEDENZA ASSOLUTA):
-            {extra_rulings_db}
-            ---
-    
-            SCENARIO UTENTE:
-            "{st.session_state.question_text}"
-            
-            ISTRUZIONI:
-            1. Analizza lo scenario cercando cavilli legali.
-            2. Se la mossa è illegale, dillo chiaramente.
-            3. RAGIONA PASSO-PASSO prima di rispondere.
-            
-            FORMATO RISPOSTA RICHIESTO:
-            Devi dividere la risposta in due parti separate da una riga con scritto esattamente "---DETTAGLI---".
-            
-            Parte 1 (Prima di ---DETTAGLI---):
-            - Risposta diretta e concisa (es: "Sì, legale" oppure "No, mossa illegale").
-            
-            ---DETTAGLI---
-            
-            Parte 2 (Dopo ---DETTAGLI---):
-            - Analisi tecnica step-by-step.
-            - Cita le regole del Damage Step se rilevante.
-            """
-            
-            response = get_gemini_response(model, prompt_ruling)
-            
-            if "---DETTAGLI---" in response:
-                short_answer, deep_dive = response.split("---DETTAGLI---")
-            else:
-                short_answer = response
-                deep_dive = "Nessun dettaglio tecnico aggiuntivo fornito."
+        # 4. Generazione Verdetto (CACHE o NUOVO)
+        if not st.session_state.get("verdict_ready", False):
+             with st.spinner("Generazione verdetto in corso..."):
+                 
+                 # USE STANDARD RESOLVED MODEL
+                 judge_model, model_name = resolve_working_model()
+     
+                 # RULING UFFICIALI AGGIUNTIVE
+                 extra_rulings_db = """
+ Q: Both players control a face-up Mirrorjade the Iceblade Dragon. Can I activate Mind Control targeting my opponent's copy of Mirrorjade? If yes, what happens when it resolves?
+ A: You can activate Mind Control. If you still control a face-up Mirrorjade when Mind Control resolves, you take control of your opponent's Mirrorjade, and it is then immediately destroyed.
+                 
+ Q: I control a face-up Mirrorjade the Iceblade Dragon. Can I use Polymerization to Fusion Summon another copy of Mirrorjade the Iceblade Dragon, using the copy on my field as material?
+ A: No, you cannot. You can only control 1 face-up "Mirrorjade the Iceblade Dragon", and cannot attempt to Summon another copy if you already do.
+ 
+ Q: If Mirrorjade's Quick Effect is negated, or its activation is negated, can that Mirrorjade use that effect again the next turn?
+ A: Yes. This card cannot use this effect next turn is part of Mirrorjade's effect. If Mirrorjade's effect, or its activation, is negated, the entire effect is not applied, including that part.
+ 
+ Q: I activate Mirrorjade's Quick Effect. In response, the effect of my opponent's Destiny HERO - Destroyer Phoenix Enforcer resolves, destroying both it and another card on my field. If Mirrorjade is the only monster on the field when its Quick Effect resolves, what happens?
+ A: When Mirrorjade's effect resolves, you must attempt to banish a monster on the field. If Mirrorjade is the only monster on the field that you can attempt to banish, you must banish Mirrorjade itself.
+ """
+     
+                 prompt_ruling = f"""
+                 Sei un **HEAD JUDGE UFFICIALE DI YU-GI-OH** (Livello 3).
+                 Il tuo compito è emettere ruling tecnici estremamente precisi e pignoli.
+         
+                 REGOLAMENTO CRITICO:
+                 - **Damage Step**: Sii ESTREMAMENTE severo. Solo carte che modificano direttamente ATK/DEF, Counter Traps, o effetti che negano specificamente *l'attivazione* (non l'effetto) possono essere attivate qui.
+                 - **Condizioni di Gioco (Game State)**: Verifica sempre se l'azione è permessa dallo stato attuale del gioco.
+         
+                 TESTI UFFICIALI (Fonte di Verità):
+                 ---
+                 {cards_context}
+                 ---
+                 
+                 DATABASE RULING EXTRA (PRECEDENZA ASSOLUTA):
+                 {extra_rulings_db}
+                 ---
+         
+                 SCENARIO UTENTE:
+                 "{st.session_state.question_text}"
+                 
+                 ISTRUZIONI:
+                 1. Analizza lo scenario cercando cavilli legali.
+                 2. Se la mossa è illegale, dillo chiaramente.
+                 3. RAGIONA PASSO-PASSO prima di rispondere.
+                 
+                 FORMATO RISPOSTA RICHIESTO:
+                 Devi dividere la risposta in due parti separate da una riga con scritto esattamente "---DETTAGLI---".
+                 
+                 Parte 1 (Prima di ---DETTAGLI---):
+                 - Risposta diretta e concisa (es: "Sì, legale" oppure "No, mossa illegale").
+                 
+                 ---DETTAGLI---
+                 
+                 Parte 2 (Dopo ---DETTAGLI---):
+                 - Analisi tecnica step-by-step.
+                 - Cita le regole del Damage Step se rilevante.
+                 """
+                 
+                 response = get_gemini_response(judge_model, prompt_ruling)
+                 
+                 if "---DETTAGLI---" in response:
+                     short_answer, deep_dive = response.split("---DETTAGLI---")
+                 else:
+                     short_answer = response
+                     deep_dive = "Nessun dettaglio tecnico aggiuntivo fornito."
+                     
+                 # SALVA IN SESSION STATE
+                 st.session_state.verdict_short = short_answer
+                 st.session_state.verdict_deep = deep_dive
+                 st.session_state.verdict_ready = True
+                 
+        # LEGGI DA SESSION STATE
+        short_answer = st.session_state.verdict_short
+        deep_dive = st.session_state.verdict_deep
     
             st.success(f"Verdetto Rapido (Model: {model_name}):")
             st.markdown(short_answer)
@@ -670,6 +687,69 @@ A: When Mirrorjade's effect resolves, you must attempt to banish a monster on th
             with col_new:
                 if st.button("Nuova Domanda 🔄"):
                     reset_judge()
+        
+            # --- FASE 4: CONVERSATIONAL JUDGE (Follow-up Chat) ---
+            st.divider()
+            st.markdown("### 💬 Chiedi chiarimenti al Giudice")
+            st.markdown("Hai dubbi sul verdetto? Chiedi pure qui sotto. Il Giudice ricorda il contesto!")
+            
+            # 1. Display History
+            for message in st.session_state.judge_chat_history:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+            
+            # 2. Chat Input
+            if user_query := st.chat_input("Esempio: 'Ma se incateno X prima?'"):
+                
+                # Append user message
+                st.session_state.judge_chat_history.append({"role": "user", "content": user_query})
+                with st.chat_message("user"):
+                    st.markdown(user_query)
+                
+                # 3. Generate Answer
+                with st.chat_message("assistant"):
+                    with st.spinner("Il Giudice sta riflettendo..."):
+                        try:
+                            # Re-construct context
+                            current_verdict_short = st.session_state.verdict_short
+                            current_verdict_deep = st.session_state.verdict_deep
+                            
+                            # Retrieve OCG Rulings Text if relevant (it's not easily accessible unless we persisted it)
+                            # We can just say "OCG Rulings found earlier" or try to scrape the Code block? 
+                            # Better: We rely on the fact that if OCG rulings were found, the "Cards Context" 
+                            # variable we construct below might miss them if we don't persist 'found_rulings'.
+                            # FOR NOW: Let's use the standard Card Context + Verdict.
+                            
+                            # Construct Context Prompt
+                            chat_context_prompt = f"""
+                            SEI L'HEAD JUDGE DI PRMA.
+                            
+                            CONTESTO UFFICIALE:
+                            Hai appena emesso il seguente verdetto:
+                            "{current_verdict_short}"
+                            
+                            Dettagli tecnici forniti:
+                            "{current_verdict_deep}"
+                            
+                            SCENARIO ORIGINALE:
+                            "{st.session_state.question_text}"
+                            
+                            NUOVA DOMANDA UTENTE (Chat):
+                            "{user_query}"
+                            
+                            COMPITO:
+                            Rispondi alla nuova domanda dell'utente rimanendo coerente con il verdetto che hai già dato.
+                            Sii sintetico, diretto e professionale.
+                            """
+                            
+                            # Call Model
+                            chat_response = get_gemini_response(judge_model, chat_context_prompt)
+                            
+                            st.markdown(chat_response)
+                            st.session_state.judge_chat_history.append({"role": "assistant", "content": chat_response})
+                            
+                        except Exception as chat_e:
+                            st.error(f"Errore chat: {chat_e}")
 
 elif mode == "📊 Meta Analyst":
     st.title("Meta Analyst 📊")
