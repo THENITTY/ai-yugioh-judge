@@ -161,12 +161,10 @@ def get_card_data(card_name):
 def resolve_working_model():
     """Tenta automaticamente di trovare un modello funzionante."""
     candidate_models = [
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.0-flash",
-        "gemini-flash-latest",
-        "gemini-pro-latest",
-        "gemini-1.5-flash"
+        "gemini-1.5-pro",
+        "gemini-1.5-flash",
+        "gemini-2.0-flash-exp",
+        "gemini-pro",
     ]
     
     for model_name in candidate_models:
@@ -402,11 +400,13 @@ if mode == "👨‍⚖️ AI Judge":
                 st.session_state.detected_cards = clean_list
                 st.session_state.step = 3
                 st.rerun()
-
     # --- STEP 3: Verdetto ---
     elif st.session_state.step == 3:
         st.subheader("⚖️ Verdetto del Giudice")
         
+        # SMART MODE TOGGLE
+        use_smart_judge = st.toggle("🧠 Modalità Avanzata (Ricerca Web + Rulings)", value=True, help="Usa Google Search per verificare ruling ufficiali. Più lento ma preciso.")
+
         found_cards_data = []
         cards_context = ""
         missing_cards = []
@@ -431,15 +431,38 @@ if mode == "👨‍⚖️ AI Judge":
                     progress_bar.progress((idx + 1) / total_cards)
         
         with st.spinner("Generazione verdetto in corso..."):
+            
+            # MODEL SELECTION
+            judge_model = None
+            if use_smart_judge:
+                # Try Smart Model with Search Tools
+                try:
+                    tools_config = 'google_search_retrieval' # Shorthand for grounding
+                    # Prefer Pro for reasoning
+                    judge_model = genai.GenerativeModel('gemini-1.5-pro', tools=tools_config)
+                    st.toast("🧠 Uso Gemini 1.5 Pro + Google Search")
+                except:
+                    try:
+                        # Fallback to Flash + Search
+                        judge_model = genai.GenerativeModel('gemini-1.5-flash', tools=tools_config)
+                        st.toast("⚡ Uso Gemini 1.5 Flash + Google Search")
+                    except:
+                        # Fallback to standard
+                        judge_model, _ = resolve_working_model()
+                        st.warning("⚠️ Search Tools non disponibili. Uso modello base.")
+            else:
+                 judge_model, _ = resolve_working_model()
+
             prompt_ruling = f"""
             Sei un **HEAD JUDGE UFFICIALE DI YU-GI-OH** (Livello 3).
-            Il tuo compito è emettere ruling tecnici estremamente precisi e pignoli.
+            Il tuo compito è emettere ruling tecnici estremamente precisi.
+
+            {"ISTRUZIONE SPECIALE: USA GOOGLE SEARCH PER CERCARE RULING UFFICIALI (es. 'Mirrorjade ruling control 1', 'Mind Control ruling'). Citale se trovate." if use_smart_judge else ""}
     
             REGOLAMENTO CRITICO:
-            - **Damage Step**: Sii ESTREMAMENTE severo. Solo carte che modificano direttamente ATK/DEF, Counter Traps, o effetti che negano specificamente *l'attivazione* (non l'effetto) possono essere attivate qui (salvo eccezioni esplicite).
-            - **Esempio Pignolo**: "Ash Blossom & Joyous Spring" NEGA L'EFFETTO, NON l'attivazione. Quindi NON PUÒ quasi mai essere usata nel Damage Step. Se l'utente chiede questo, devi dire di NO e spiegare brutalmente perché.
-            - **Conjunctions**: Fai attenzione a "E", "ANCHE SE", "POI".
-            - **Spell Speed**: Rispetta rigorosamente le velocità di attivazione.
+            - **Damage Step**: Sii ESTREMAMENTE severo.
+            - **Condizioni di Attivazione**: Verifica se l'attivazione è legale PRIMA della risoluzione.
+            - **Search**: Se usi i tool di ricerca, verifica fonti come 'db.yugioh-card.com' o 'Yugipedia'.
     
             TESTI UFFICIALI (Fonte di Verità):
             ---
@@ -448,31 +471,37 @@ if mode == "👨‍⚖️ AI Judge":
     
             SCENARIO UTENTE:
             "{st.session_state.question_text}"
-    
+            
             ISTRUZIONI:
             1. Analizza lo scenario cercando cavilli legali.
             2. Se la mossa è illegale, dillo chiaramente.
-            3. Usa terminologia ufficiale (Activation, Resolution, SEGOC, Turn Player Priority).
+            3. Usa terminologia ufficiale.
             
             FORMATO RISPOSTA RICHIESTO:
             Devi dividere la risposta in due parti separate da una riga con scritto esattamente "---DETTAGLI---".
             
             Parte 1 (Prima di ---DETTAGLI---):
-            - Risposta diretta e concisa (es: "Sì, [Carta X] nega [Carta Y]" oppure "No, mossa illegale").
+            - Risposta diretta e concisa (es: "Sì, legale" oppure "No, mossa illegale").
             
             ---DETTAGLI---
             
             Parte 2 (Dopo ---DETTAGLI---):
             - Analisi tecnica step-by-step.
-            - Cita le regole del Damage Step se rilevante.
+            - Citazione Rulings (se trovate).
             """
             
-            response = get_gemini_response(model, prompt_ruling)
+            # Call generation directly to support tools if present
+            try:
+                response_obj = judge_model.generate_content(prompt_ruling)
+                response_text = response_obj.text
+            except Exception as e:
+                st.error(f"Errore generazione Judge: {e}")
+                response_text = "Errore durante la generazione del verdetto."
             
-            if "---DETTAGLI---" in response:
-                short_answer, deep_dive = response.split("---DETTAGLI---")
+            if "---DETTAGLI---" in response_text:
+                short_answer, deep_dive = response_text.split("---DETTAGLI---")
             else:
-                short_answer = response
+                short_answer = response_text
                 deep_dive = "Nessun dettaglio tecnico aggiuntivo fornito."
     
             st.success("Verdetto Rapido:")
