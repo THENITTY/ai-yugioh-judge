@@ -253,33 +253,41 @@ class YuGiOhMetaScraper:
                         # 2. Apply Tier via JS (Bypasses visibility)
                         page.evaluate(f"document.getElementById('filter-tier').value = '{tier_val}';")
                         page.evaluate("document.getElementById('filter-tier').dispatchEvent(new Event('change'));")
-                        time.sleep(2) # Wait for reload
+                        
+                        # Wait for table to react (short sleep is safer than complex selectors here)
+                        time.sleep(0.5)
                         
                         # 3. Apply "TCG" via JS
                         page.evaluate("document.getElementById('filter-format').value = 'TCG';")
                         page.evaluate("document.getElementById('filter-format').dispatchEvent(new Event('change'));")
-                        time.sleep(1) 
+                        
+                        # Wait for reload
+                        try:
+                            # Try waiting for the processing indicator to appear and disappear
+                            page.wait_for_selector("#tournaments-table_processing", state="visible", timeout=2000)
+                            page.wait_for_selector("#tournaments-table_processing", state="hidden", timeout=5000)
+                        except:
+                            time.sleep(1) # Fallback if selector not found
                         
                         # 4. Set "Show 100 entries"
-                        # This might be a standard select or custom. 
-                        # Let's try standard select based on previous code working intermittently, but JS is safer if we can find ID.
-                        # The limit selector doesn't have an obvious ID in previous context, but likely 'name="tournaments-table_length"' or similar.
-                        # We stick to the 'find select with option 100' loop but use JS to set it if found.
                         selects = page.query_selector_all("select")
                         for s in selects:
                             try:
-                                # Check if it has 100 option
                                 has_100 = s.evaluate("el => !!el.querySelector('option[value=\"100\"]')")
                                 if has_100:
                                     s.evaluate("el => { el.value = '100'; el.dispatchEvent(new Event('change')); }")
+                                    # Wait for processing again
+                                    try:
+                                        page.wait_for_selector("#tournaments-table_processing", state="visible", timeout=1000)
+                                        page.wait_for_selector("#tournaments-table_processing", state="hidden", timeout=3000)
+                                    except:
+                                        time.sleep(1)
                                     break
                             except: pass
-                        time.sleep(3) # Wait for table reload
                         
-                        # SCROLL LOOP
-                        for _ in range(5):
-                            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                            time.sleep(1)
+                        # SCROLL (Just once to trigger lazy load images if any)
+                        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        time.sleep(0.5)
                         
                         # Extract anchors for this tier
                         current_anchors = page.query_selector_all("a[href*='/tournament/']")
