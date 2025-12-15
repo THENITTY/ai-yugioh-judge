@@ -671,6 +671,94 @@ class YuGiOhMetaScraper:
         except Exception as e:
             return f"Error parsing deck: {e}"
 
+    def search_ygoresources_ruling(self, card_name):
+        """
+        Searches db.ygoresources.com for a card and extracts its rulings.
+        Returns the text of the rulings or None.
+        """
+        from playwright.sync_api import sync_playwright
+        import urllib.parse
+        import time
+
+        encoded_name = urllib.parse.quote(card_name)
+        search_url = f"https://db.ygoresources.com/search?name={encoded_name}&view=card"
+        
+        print(f"DEBUG: Searching YGO Resources for: {card_name}")
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=True,
+                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+                )
+                page = browser.new_page()
+                page.goto(search_url, timeout=45000)
+                
+                # 1. Wait for Results
+                # The search results are typically rows in a table or list
+                # We try to click the first link that looks like a card detail
+                try:
+                    # Generic selector for the first result link in their table
+                    # Usually: tr > td > a
+                    # Or check if we are redirected directly to the card (depends on exact match)
+                    
+                    # Wait a bit for JS to render results
+                    time.sleep(3)
+                    
+                    # Check if we are already on a card page (URL contains /card#)
+                    if "/card#" in page.url:
+                        print("DEBUG: Direct hit on card page.")
+                    else:
+                        # Attempt to click valid result
+                        # Selector might need adjustment based on site structure
+                        # Looking for an anchor in main content area
+                        page.wait_for_selector("a[href^='/card#']", timeout=10000)
+                        page.click("a[href^='/card#']", position={"x": 0, "y": 0})
+                        time.sleep(3)
+                
+                except Exception as click_err:
+                    print(f"DEBUG: Could not click result or already on page: {click_err}")
+                    pass # Continue hoping we are on the page
+
+                # 2. Extract Rulings (FAQ)
+                # Look for "FAQ" section or "Q&A" text
+                # Site structure usually has tabs or sections.
+                
+                # Extract all text and then filter?
+                # Or look for specific container.
+                
+                # Let's grab the whole body text and filter for Q&A pattern
+                full_text = page.inner_text("body")
+                
+                if not full_text:
+                    browser.close()
+                    return None
+                
+                # Filter for lines looking like Q: ... A: ...
+                lines = full_text.split('\n')
+                qa_lines = []
+                capture = False
+                
+                for line in lines:
+                    line = line.strip()
+                    if "Q:" in line or "Question" in line:
+                         capture = True
+                    
+                    if capture:
+                        qa_lines.append(line)
+                        # Heuristic to stop capturing? No, grab all.
+                
+                browser.close()
+                
+                if len(qa_lines) > 0:
+                    return "\n".join(qa_lines)
+                else:
+                    return None
+
+        except Exception as e:
+            print(f"YGO Resources Scrape Error: {e}")
+            return None
+
 # Usage Example (for integration)
 # scraper = YuGiOhMetaScraper()
 # eid, name = scraper.get_event_id_from_deck_url("/guadalajara-december-2025-regional/maliss/...")

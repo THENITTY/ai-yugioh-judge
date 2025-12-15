@@ -496,14 +496,43 @@ A: When Mirrorjade's effect resolves, you must attempt to banish a monster on th
                 short_answer = response
                 deep_dive = "Nessun dettaglio tecnico aggiuntivo fornito."
     
-            st.success("Verdetto Rapido:")
+            st.success(f"Verdetto Rapido (Model: {model_name}):")
             st.markdown(short_answer)
             
             with st.expander("🧐 Spiegazione Tecnica Approfondita"):
                 st.markdown(deep_dive.strip())
-            
-        if st.button("Nuova Domanda 🔄"):
-            reset_judge()
+
+            # --- EXPERIMENTAL: YGO RESOURCES SEARCH ---
+            st.markdown("---")
+            col_sc, col_new = st.columns([2, 1])
+            with col_sc:
+                if st.button("🔍 Consulta YGO Resources (OCG Rulings)"):
+                    card_to_search = None
+                    if 'found_cards' in locals() and found_cards:
+                         card_to_search = found_cards[0]['name']
+                    elif st.session_state.question_text:
+                         card_to_search = st.session_state.question_text[:30] # Try with question snippet? risky
+                    
+                    if card_to_search:
+                         with st.spinner(f"Cerco ruling OCG per '{card_to_search}' su db.ygoresources.com... (richiede ~10s)"):
+                             try:
+                                 scraper = YuGiOhMetaScraper()
+                                 rulings_text = scraper.search_ygoresources_ruling(card_to_search)
+                                 
+                                 if rulings_text:
+                                     st.info(f"📜 **Ruling OCG Trovati per '{card_to_search}':**")
+                                     st.code(rulings_text, language="text")
+                                     st.toast("Ruling trovati! Rileggili e valuta se cambia il verdetto.")
+                                 else:
+                                     st.warning(f"Nessun ruling specifico trovato per '{card_to_search}'.")
+                             except Exception as e:
+                                 st.error(f"Errore durante la ricerca: {e}")
+                    else:
+                         st.warning("Nessuna carta identificata per la ricerca.")
+
+            with col_new:
+                if st.button("Nuova Domanda 🔄"):
+                    reset_judge()
 
 elif mode == "📊 Meta Analyst":
     st.title("Meta Analyst 📊")
