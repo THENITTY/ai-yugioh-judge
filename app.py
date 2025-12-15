@@ -441,12 +441,13 @@ if mode == "👨‍⚖️ AI Judge":
         st.session_state.found_cards_cache = found_cards_data      
 
         # 4. Generazione Verdetto (CACHE o NUOVO)
+        # 4. Generazione Verdetto (CACHE o NUOVO)
+        # MOVED OUTSIDE FOR SCOPE SAFETY
+        judge_model, model_name = resolve_working_model()
+        
         if not st.session_state.get("verdict_ready", False):
              with st.spinner("Generazione verdetto in corso..."):
                  
-                 # USE STANDARD RESOLVED MODEL
-                 judge_model, model_name = resolve_working_model()
-     
                  # RULING UFFICIALI AGGIUNTIVE
                  extra_rulings_db = """
  Q: Both players control a face-up Mirrorjade the Iceblade Dragon. Can I activate Mind Control targeting my opponent's copy of Mirrorjade? If yes, what happens when it resolves?
@@ -517,11 +518,11 @@ if mode == "👨‍⚖️ AI Judge":
         short_answer = st.session_state.verdict_short
         deep_dive = st.session_state.verdict_deep
     
-            st.success(f"Verdetto Rapido (Model: {model_name}):")
-            st.markdown(short_answer)
-            
-            with st.expander("🧐 Spiegazione Tecnica Approfondita"):
-                st.markdown(deep_dive.strip())
+        st.success(f"Verdetto Rapido (Model: {model_name}):")
+        st.markdown(short_answer)
+        
+        with st.expander("🧐 Spiegazione Tecnica Approfondita"):
+            st.markdown(deep_dive.strip())
 
             # --- EXPERIMENTAL: YGO RESOURCES SEARCH ---
             st.markdown("---")
