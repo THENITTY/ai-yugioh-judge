@@ -508,10 +508,8 @@ elif mode == "📊 Meta Analyst":
         if meta_source == "YGOProDeck (TCG)":
             st.markdown("### Analisi Trend, Top Cut e Decklist")
             
-            manual_url = st.text_input("🔗 Hai un link specifico? Incollalo qui (es. YGOProDeck Tournament URL):", placeholder="https://ygoprodeck.com/tournament/...")
-
             if st.button("🔄 Aggiorna Database Meta (TCG)"):
-                with st.spinner("Scansiono il Web + Link Manuali..."):
+                with st.spinner("Scansiono il Web (Tornei Recenti)..."):
                     try:
                         # CONFIGURAZIONE
                         HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
@@ -519,13 +517,8 @@ elif mode == "📊 Meta Analyst":
                         
                         urls_to_scrape = set()
                         scan_log = []
-
-                        # 1. Aggiungi Link Manuale se presente
-                        if manual_url and "ygoprodeck.com" in manual_url:
-                            urls_to_scrape.add(manual_url)
-                            scan_log.append(f"🔗 Link Manuale Aggiunto: {manual_url}")
-
-                        # 2. Discovery Automatica (Playwright)
+                        
+                        # 1. Discovery Automatica (Playwright)
                         st.toast("🤖 Avvio Browser per cercare tornei recenti...")
                         scraper_tool = YuGiOhMetaScraper() # Utilizziamo la classe per accedere al metodo Playwright
                         
@@ -843,141 +836,144 @@ elif mode == "📊 Meta Analyst":
     st.divider()
 
     # --- FASE 2: Chatbot (RAG) - COMUNE ---
-    meta_query = st.text_area("Domanda sul Meta TCG:", placeholder="Es: 'Quali sono i Tier 1 attuali?' o 'Lista per Tenpai Dragon?'", height=100)
+    st.markdown("### 💬 Chiedi al Giudice (Chat)")
     
-    if st.button("Analizza Meta 🧠"):
-        if not meta_query:
-            st.warning("Scrivi una domanda.")
-        elif not st.session_state.meta_context:
-            st.error("Prima devi scaricare i dati cliccando su 'Aggiorna Database Meta'!")
+    # CSS STYLE INJECTION FOR TOOLTIPS (Inject ONCE)
+    st.markdown("""
+    <style>
+    /* Tooltip Container */
+    .ygo-card-wrapper {
+        position: relative;
+        display: inline-block;
+        margin: 4px;
+        cursor: pointer;
+    }
+    .ygo-card-wrapper:hover .ygo-tooltip {
+        visibility: visible;
+        opacity: 1;
+    }
+    /* Tooltip Box */
+    .ygo-tooltip {
+        visibility: hidden;
+        width: 250px;
+        background-color: #1e1e1e;
+        color: #fff;
+        text-align: left;
+        border: 1px solid #444;
+        border-radius: 8px;
+        padding: 10px;
+        position: absolute;
+        z-index: 1000;
+        bottom: 120%; /* Show above */
+        left: 50%;
+        margin-left: -125px;
+        opacity: 0;
+        transition: opacity 0.2s;
+        box-shadow: 0px 4px 15px rgba(0,0,0,0.5);
+        font-size: 12px;
+        pointer-events: none; /* Let clicks pass through if needed, though mostly visual */
+    }
+    .ygo-tooltip img {
+        width: 100%;
+        border-radius: 4px;
+        margin-bottom: 8px;
+    }
+    .ygo-tooltip h4 {
+        margin: 0 0 5px 0;
+        font-size: 14px;
+        color: #ffcc00;
+    }
+    .ygo-tooltip p {
+        margin: 0 0 5px 0;
+        line-height: 1.3;
+    }
+    .ygo-badge {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        background-color: #000;
+        color: #00ffcc;
+        font-weight: bold;
+        font-size: 11px;
+        padding: 2px 4px;
+        border-radius: 4px 0 4px 0;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Init Session State
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+    # Display History
+    for message in st.session_state.chat_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"], unsafe_allow_html=True)
+
+    # Chat Input
+    if meta_query := st.chat_input("Fai una domanda sul Meta (es. Trend, Decklist, Counter)..."):
+        
+        # 1. User Message
+        st.session_state.chat_history.append({"role": "user", "content": meta_query})
+        with st.chat_message("user"):
+            st.markdown(meta_query)
+            
+        # 2. Check Context
+        if not st.session_state.meta_context:
+            err_msg = "⚠️ **Database Vuoto!** Clicca 'Aggiorna Database Meta' in alto per scaricare i dati dei tornei."
+            st.session_state.chat_history.append({"role": "assistant", "content": err_msg})
+            with st.chat_message("assistant"):
+                st.error(err_msg)
         else:
-            # Uso modello standard (niente tools, niente errori)
-            meta_model, _ = resolve_working_model()
-            
-            # CSS STYLE INJECTION FOR TOOLTIPS (Must run in Streamlit)
-            st.markdown("""
-            <style>
-            /* Tooltip Container */
-            .ygo-card-wrapper {
-                position: relative;
-                display: inline-block;
-                margin: 4px;
-                cursor: pointer;
-            }
-            .ygo-card-wrapper:hover .ygo-tooltip {
-                visibility: visible;
-                opacity: 1;
-            }
-            /* Tooltip Box */
-            .ygo-tooltip {
-                visibility: hidden;
-                width: 250px;
-                background-color: #1e1e1e;
-                color: #fff;
-                text-align: left;
-                border: 1px solid #444;
-                border-radius: 8px;
-                padding: 10px;
-                position: absolute;
-                z-index: 1000;
-                bottom: 120%; /* Show above */
-                left: 50%;
-                margin-left: -125px;
-                opacity: 0;
-                transition: opacity 0.2s;
-                box-shadow: 0px 4px 15px rgba(0,0,0,0.5);
-                font-size: 12px;
-                pointer-events: none; /* Let clicks pass through if needed, though mostly visual */
-            }
-            .ygo-tooltip img {
-                width: 100%;
-                border-radius: 4px;
-                margin-bottom: 8px;
-            }
-            .ygo-tooltip h4 {
-                margin: 0 0 5px 0;
-                font-size: 14px;
-                color: #ffcc00;
-            }
-            .ygo-tooltip p {
-                margin: 0 0 5px 0;
-                line-height: 1.3;
-            }
-            .ygo-badge {
-                position: absolute;
-                bottom: 0;
-                right: 0;
-                background-color: rgba(0,0,0,0.85);
-                color: #00ffcc;
-                font-weight: bold;
-                font-size: 11px;
-                padding: 2px 4px;
-                border-radius: 4px 0 4px 0;
-            }
-            </style>
-            """, unsafe_allow_html=True)
+            # 3. AI Generation
+            with st.chat_message("assistant"):
+                meta_model, _ = resolve_working_model()
+                
+                # Construct History Text for Prompt
+                history_text = ""
+                for msg in st.session_state.chat_history[-6:]: # Utili ultimi 3 turni (User+AI)
+                    role_label = "UTENTE" if msg["role"] == "user" else "AI"
+                    history_text += f"{role_label}: {msg['content']}\n"
 
-            # RAG PROMPT DEFINITION
-            prompt_rag = f"""
-            Sei un esperto di Yu-Gi-Oh! TCG.
-            
-            DOMANDA UTENTE: "{meta_query}"
-            FONTE DI VERITÀ: {st.session_state.meta_context}
-            
-            ISTRUZIONI COMPORTAMENTALI:
-            1. **INTENTO & VELOCITÀ**: Sii CONCISO.
-               - Se l'utente chiede "Analisi", "Trend" o "Cosa vince": Usa elenchi puntati e brevi descrizioni. **NON GENERARE DECKLIST VISIVE**.
-               - Genera la **DECKLIST VISIVA (HTML)** SOLO se l'utente chiede ESPLICITAMENTE una lista o un mazzo specifico (es. "Mostrami il mazzo di X").
-            
-            2. **FORMATTAZIONE DECKLIST (IMPORTANTE)**:
-               - **ORDINAMENTO**:
-                 - **Main Deck**: ORDINA RIGOROSAMENTE: **Mostri** ➡️ **Magie** ➡️ **Trappole**.
-                 - **Extra Deck**: Fusion/Synchro/Xyz/Link.
-                 - **Side Deck**: Ordinato (Mostri/Magie/Trap) MA visualizzato in un **UNICO CONTAINER** (non spezzare le righe tra le categorie).
-                 
-               - **STRUTTURA HTML**: Per OGNI carta, genera questo blocco HTML (non usare markdown o tabelle):
-                 ```html
-                 <div class="ygo-card-wrapper">
-                    <img src="URL_IMMAGINE" width="60" style="border-radius: 4px;">
-                    <div class="ygo-badge">3x</div>
-                    <div class="ygo-tooltip">
-                        <img src="URL_IMMAGINE"> <!-- Immagine Grande -->
-                        <h4>NOME CARTA</h4>
-                        <p><b>Tipo/Attributo</b>: [Es. Dragon/Dark/Level 8]</p>
-                        <p><b>Effetto</b>: [Scrivi qui l'effetto breve o riassunto...]</p>
-                    </div>
-                 </div>
-                 ```
-               - **REGOLE**:
-                 - Sostituisci `3x` con la quantità corretta.
-                 - Sostituisci `URL_IMMAGINE` e `NOME CARTA`.
-                 - INVENTA/RECUPERA i Dati (Tipo, Attributo, Effetto) basandoti sulla tua conoscenza della carta.
-                 - Raggruppa i blocchi in un `div` flexbox: `<div style="display: flex; flex-wrap: wrap;">...</div>`.
-                 
-               - Usa SEMPRE: `<details><summary>📜 Decklist: [Piazzamento] [Nome] ([Mazzo])</summary> <h3>Main Deck</h3> [Flex Div Mostri+Magie+Trap] ... </details>`
-
-            3. **FORMATTAZIONE REPORT (Solo se richiesto genericamente)**:
-               - **Metagame Breakdown**: % Mazzi.
-               - **Top Techs**: Carte più giocate.
-            
-            4. **REGOLE DATA**:
-               - Ignora OCG/Master Duel list.
-               - Usa solo i dati forniti sopra.
-            """
-            
-            try:
-                with st.spinner("🤖 L'IA sta analizzando i dati..."):
-                    response_stream = meta_model.generate_content(prompt_rag, stream=True)
-                    
-                    # Streaming Output
-                    full_response = ""
-                    placeholder = st.empty()
-                    
-                    for chunk in response_stream:
+                prompt_rag = f"""
+                Sei un esperto di Yu-Gi-Oh! TCG.
+                
+                FONTE DI VERITÀ (DATI TORNEI):
+                {st.session_state.meta_context}
+                
+                CRONOLOGIA CHAT RECENTE:
+                {history_text}
+                
+                DOMANDA CORRENTE UTENTE: "{meta_query}"
+                
+                ISTRUZIONI COMPORTAMENTALI:
+                1. **INTENTO & VELOCITÀ**: Sii CONCISO.
+                    - Rispondi basandoti SUI DATI e sulla CRONOLOGIA.
+                    - Usa elenchi puntati.
+                    - Genera HTML SOLO se richiesto.
+                
+                2. **FORMATTAZIONE DECKLIST (HTML)** (Solo se richiesta):
+                   - Struttura: `<div class="ygo-card-wrapper"><img src="...">...</div>`.
+                   - Usa `<details>` per chiudere i mazzi lunghi.
+                   
+                3. **REGOLE**:
+                   - Ignora OCG.
+                   - Se la domanda si riferisce a "ciò che abbiamo detto prima", usa la CRONOLOGIA.
+                """
+                
+                # Stream Response
+                full_response = ""
+                placeholder = st.empty()
+                try:
+                    stream = meta_model.generate_content(prompt_rag, stream=True)
+                    for chunk in stream:
                         if chunk.text:
                             full_response += chunk.text
                             placeholder.markdown(full_response + "▌", unsafe_allow_html=True)
-                    
                     placeholder.markdown(full_response, unsafe_allow_html=True)
-            except Exception as e:
-                st.error(f"Errore generazione: {e}")
+                    
+                    # Add to history
+                    st.session_state.chat_history.append({"role": "assistant", "content": full_response})
+                    
+                except Exception as e:
+                    st.error(f"Errore generazione: {e}")
