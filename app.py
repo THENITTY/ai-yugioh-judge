@@ -161,8 +161,12 @@ def get_card_data(card_name):
 def resolve_working_model():
     """Tenta automaticamente di trovare un modello funzionante."""
     candidate_models = [
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-latest",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.0-flash",
+        "gemini-flash-latest",
+        "gemini-pro-latest",
+        "gemini-1.5-flash"
     ]
     
     for model_name in candidate_models:
@@ -172,7 +176,7 @@ def resolve_working_model():
         except Exception:
             continue
             
-    return genai.GenerativeModel("gemini-1.5-flash"), "gemini-1.5-flash (Default)"
+    return genai.GenerativeModel("gemini-2.5-flash"), "gemini-2.5-flash (Default)"
 
 # --- Gestione Autenticazione ---
 def load_keys():
