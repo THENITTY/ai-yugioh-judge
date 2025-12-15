@@ -1,23 +1,29 @@
-# Use official Playwright image (includes Python + Browsers + OS Dependencies)
-# This is the "Nuclear Option" against missing browser errors.
-FROM mcr.microsoft.com/playwright/python:v1.40.0-jammy
+# Use standard Python image (Avoids MCR registry 403 errors)
+FROM python:3.9-slim
 
 # Set working directory
 WORKDIR /app
 
-# Copy dependency definition
+# Install system dependencies for Playwright (and general build tools)
+RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first
 COPY requirements.txt .
 
-# Install Python dependencies
-# Playwright is already in the image, but this ensures other libs (streamlit, etc.) are installed.
+# Install Python deps
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application code
+# Install Playwright Browsers (Chromium only to save space/time)
+RUN playwright install --with-deps chromium
+
+# Copy app code
 COPY . .
 
-# Expose Streamlit's default port
-EXPOSE 8501
+# Hugging Face Spaces expects port 7860
+EXPOSE 7860
 
-# Run the application
-# --server.address=0.0.0.0 is required for Docker containers
-CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0"]
+# Run Streamlit on port 7860
+CMD ["streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=7860"]
