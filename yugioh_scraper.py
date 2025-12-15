@@ -162,11 +162,39 @@ class YuGiOhMetaScraper:
                         links.add(href)
                         
                 browser.close()
-                
+            
             return list(links)
+        
         except Exception as e:
             print(f"Playwright Error: {e}")
-            return []
+            print("⚠️ Playwright failed. Switching to DuckDuckGo Search Fallback...")
+            
+            # FALLBACK: DuckDuckGo Search
+            try:
+                from duckduckgo_search import DDGS
+                ddgs = DDGS()
+                current_year = datetime.now().year
+                # Generic queries to find recent major tournaments
+                queries = [
+                    f"site:ygoprodeck.com/tournament/ WCQ Regional {current_year}",
+                    f"site:ygoprodeck.com/tournament/ YCS {current_year}",
+                    f"site:ygoprodeck.com/tournament/ National Championship {current_year}"
+                ]
+                
+                fallback_links = set()
+                for q in queries:
+                    results = ddgs.text(q, max_results=10)
+                    if results:
+                        for r in results:
+                            href = r.get('href')
+                            if href and "/tournament/" in href:
+                                fallback_links.add(href)
+                
+                print(f"✅ DDGS Fallback found {len(fallback_links)} tournaments.")
+                return list(fallback_links)
+            except Exception as ddgs_e:
+                print(f"❌ DDGS Fallback also failed: {ddgs_e}")
+                return []
 
             print(f"Playwright Error: {e}")
             return []
