@@ -471,32 +471,48 @@ if mode == "👨‍⚖️ AI Judge":
             """
 
             # ROBUST GENERATION LOOP
-            # Tenta Pro -> Flash (Smart) -> Flash (Standard)
+            # Tenta Pro -> Flash (Smart) -> Fallback (Resolved)
             strategies = []
+            
+            # 1. Smart Strategies (with Tools)
             if use_smart_judge:
                 strategies.append(("gemini-1.5-pro", 'google_search_retrieval'))
                 strategies.append(("gemini-1.5-flash", 'google_search_retrieval'))
             
-            # Always have a safe fallback
-            strategies.append(("gemini-1.5-flash", None))
+            # 2. Dynamic Fallback Strategy
+            # Use the model that is GUARANTEED to work (checked at startup)
+            working_model, working_name = resolve_working_model()
+            # We wrap it in a tuple format compatible with the loop, or handle it specially
+            strategies.append((working_model, None)) 
             
             response_text = ""
             success = False
             last_error = None
 
-            for model_name, tools_conf in strategies:
+            for strategy in strategies:
                 try:
-                    # Configura Modello
-                    if tools_conf:
-                        model = genai.GenerativeModel(model_name, tools=tools_conf)
+                    # Parse Strategy
+                    if isinstance(strategy[0], str):
+                        # It's a name + tools tuple
+                        model_name = strategy[0]
+                        tools_conf = strategy[1]
+                        if tools_conf:
+                            model = genai.GenerativeModel(model_name, tools=tools_conf)
+                        else:
+                            model = genai.GenerativeModel(model_name)
                     else:
-                        model = genai.GenerativeModel(model_name) # No tools
+                        # It's an already instantiated model object (fallback)
+                        model = strategy[0]
+                        model_name = "Default Fallback"
                     
-                    # Tenta Generazione
+                    # Attempt Generation
+                    # Note: resolve_working_model returns a model that MIGHT fail on generation if tools are mismatched?
+                    # The fallback model has NO tools configured, so it should be safe.
+                    
                     response_obj = model.generate_content(prompt_ruling)
                     response_text = response_obj.text
                     success = True
-                    st.toast(f"✅ Generato con {model_name} {'(Search)' if tools_conf else ''}")
+                    st.toast(f"✅ Generato con successo ({model_name})")
                     break # Success!
                 except Exception as e:
                     last_error = e
@@ -504,7 +520,7 @@ if mode == "👨‍⚖️ AI Judge":
             
             if not success:
                 st.error(f"Errore Critico Generazione: {last_error}")
-                response_text = "Errore: Impossibile generare verdetto con nessun modello."
+                response_text = f"Errore: Impossibile generare verdetto. Dettaglio: {last_error}"
             
             if "---DETTAGLI---" in response_text:
                 short_answer, deep_dive = response_text.split("---DETTAGLI---")
