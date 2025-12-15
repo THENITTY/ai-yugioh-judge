@@ -6,6 +6,7 @@ import json
 import time
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -566,43 +567,64 @@ elif mode == "📊 Meta Analyst":
                                     # Itera sulle righe (che sono spesso link <a> o div)
                                     rows = div_table.find_all(['a', 'div'], class_='tournament_table_row')
                                     
+                                    # 1. PRE-PROCESSAMENTO (Estrai metadati e Link)
+                                    processed_items = [] # list of dict
+                                    tasks = [] # (index, url)
+
                                     for i, row in enumerate(rows):
                                         cells = row.find_all('span', class_='as-tablecell')
                                         if len(cells) >= 3:
                                             place = cells[0].get_text(strip=True)
                                             
-                                            # Player Name
+                                            # Player
                                             player_span = cells[1].find('span', class_='player-name')
                                             player = player_span.get_text(strip=True) if player_span else cells[1].get_text(strip=True)
                                             
-                                            # Deck Name & Variants
+                                            # Deck
                                             deck_cell = cells[2]
                                             deck_text = deck_cell.get_text(separator=" ", strip=True)
-                                            
                                             variants = []
                                             for img in deck_cell.find_all('img', class_='archetype-tournament-img'):
                                                 title = img.get('title')
                                                 if title: variants.append(title)
                                             if variants: deck_text += " + " + " + ".join(variants)
                                             
-                                            # Link Deck
+                                            # Link
                                             deck_link = row.get('href') if row.name == 'a' else None
                                             if not deck_link:
                                                 link_tag = deck_cell.find('a')
                                                 if link_tag: deck_link = link_tag.get('href')
                                             
-                                            # Deep Scrape (Top Cut)
-                                            details = ""
+                                            # Top Cut Check
                                             is_top_cut = any(x in place.lower() for x in ["winner", "1st", "2nd", "top 4", "top 8"])
                                             
-                                            if is_top_cut and deck_link and "deck/" in deck_link:
-                                                st.toast(f"📥 Scarico lista: {player} ({deck_text})...")
-                                                # Chiama funzione scrape_deck_list (definita fuori)
-                                                deck_content = scrape_deck_list(deck_link) 
-                                                if deck_content:
-                                                    details = f"\n   [DETTAGLIO DECK]\n   {deck_content.replace(chr(10), chr(10)+'   ')}\n"
+                                            item = {
+                                                "place": place, "player": player, "deck_text": deck_text, "link": deck_link, "details": ""
+                                            }
                                             
-                                            rows_data.append(f"- {place}: {player} -> {deck_text}{details}")
+                                            if is_top_cut and deck_link and "deck/" in deck_link:
+                                                tasks.append((i, deck_link))
+                                            
+                                            processed_items.append(item)
+
+                                    # 2. ESECUZIONE PARALLELA (Fetch Deck Lists)
+                                    if tasks:
+                                        st.toast(f"📥 Scarico in parallelo {len(tasks)} liste per {page_title}...")
+                                        with ThreadPoolExecutor(max_workers=10) as executor:
+                                            future_to_idx = {executor.submit(scrape_deck_list, t[1]): t[0] for t in tasks}
+                                            
+                                            for future in as_completed(future_to_idx):
+                                                idx = future_to_idx[future]
+                                                try:
+                                                    content = future.result()
+                                                    if content:
+                                                        processed_items[idx]["details"] = f"\n   [DETTAGLIO DECK]\n   {content.replace(chr(10), chr(10)+'   ')}\n"
+                                                except Exception as exc:
+                                                    pass
+
+                                    # 3. GENERAZIONE REPORT
+                                    for item in processed_items:
+                                        rows_data.append(f"- {item['place']}: {item['player']} -> {item['deck_text']}{item['details']}")
 
                                 if rows_data:
                                     results_text = "\n".join(rows_data)
