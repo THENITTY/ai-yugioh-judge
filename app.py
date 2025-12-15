@@ -925,7 +925,9 @@ elif mode == "📊 Meta Analyst":
             FONTE DI VERITÀ: {st.session_state.meta_context}
             
             ISTRUZIONI COMPORTAMENTALI:
-            1. **INTENTO**: Rispondi SOLO alla domanda se specifica. Genera Report Completo solo se richiesto genericamente.
+            1. **INTENTO & VELOCITÀ**: Sii CONCISO.
+               - Se l'utente chiede "Analisi", "Trend" o "Cosa vince": Usa elenchi puntati e brevi descrizioni. **NON GENERARE DECKLIST VISIVE**.
+               - Genera la **DECKLIST VISIVA (HTML)** SOLO se l'utente chiede ESPLICITAMENTE una lista o un mazzo specifico (es. "Mostrami il mazzo di X").
             
             2. **FORMATTAZIONE DECKLIST (IMPORTANTE)**:
                - **ORDINAMENTO**:
@@ -963,9 +965,19 @@ elif mode == "📊 Meta Analyst":
                - Usa solo i dati forniti sopra.
             """
             
-            with st.spinner("Analizzando i report TCG..."):
-                try:
-                    response = meta_model.generate_content(prompt_rag)
-                    st.markdown(response.text, unsafe_allow_html=True)
-                except Exception as e:
-                    st.error(f"Errore generazione: {e}")
+            try:
+                with st.spinner("🤖 L'IA sta analizzando i dati..."):
+                    response_stream = meta_model.generate_content(prompt_rag, stream=True)
+                    
+                    # Streaming Output
+                    full_response = ""
+                    placeholder = st.empty()
+                    
+                    for chunk in response_stream:
+                        if chunk.text:
+                            full_response += chunk.text
+                            placeholder.markdown(full_response + "▌", unsafe_allow_html=True)
+                    
+                    placeholder.markdown(full_response, unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Errore generazione: {e}")
