@@ -5,3 +5,4 @@ python-dotenv
 duckduckgo-search
 duckduckgo-search
 beautifulsoup4
+playwright

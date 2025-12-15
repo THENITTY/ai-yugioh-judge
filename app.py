@@ -4,7 +4,8 @@ import google.generativeai as genai
 import requests
 import json
 import time
-import requests
+import subprocess
+import sys
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
