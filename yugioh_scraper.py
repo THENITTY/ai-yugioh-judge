@@ -689,53 +689,64 @@ class YuGiOhMetaScraper:
             with sync_playwright() as p:
                 browser = p.chromium.launch(
                     headless=True,
-                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-blink-features=AutomationControlled"]
                 )
-                page = browser.new_page()
                 
-                # Set User Agent to resemble a real browser
-                page.set_extra_http_headers({
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-                })
+                # IMPORTANT: Set Viewport to generic Desktop to avoid mobile layout/hidden elements
+                context = browser.new_context(
+                    viewport={"width": 1280, "height": 720},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+                )
+                page = context.new_page()
 
-                logs.append("Navigating...")
+                logs.append("Navigating with Viewport 1280x720...")
                 try:
-                    page.goto(search_url, timeout=30000)
-                    page.wait_for_load_state("networkidle") # Wait for network to settle
+                    page.goto(search_url, timeout=45000, wait_until="domcontentloaded")
+                    # Wait for ANY content to appear (heuristic: body length > 100)
+                    for i in range(10):
+                        time.sleep(1)
+                        if len(page.inner_text("body")) > 100:
+                            logs.append(f"Content loaded (iter {i}).")
+                            break
                 except Exception as nav_e:
                     logs.append(f"Nav Error: {nav_e}")
                 
-                # Check where we are
                 logs.append(f"Current URL: {page.url}")
                 logs.append(f"Page Title: {page.title()}")
 
                 # 1. Handle Navigation / Clicking
                 try:
-                    time.sleep(2) # Grace period for JS
+                    time.sleep(2) 
                     
-                    if "/card#" in page.url:
-                        logs.append("Directly on card page.")
-                    else:
-                        logs.append("Searching for card link in list...")
-                        # Try multiple selectors
+                    if "/card#" in page.url or "Card Database" in page.title():
+                        # We might be on the list OR the card.
+                        # Try to find the exact card name link
+                        logs.append("Attempting to find card link by text...")
                         try:
-                            # Standard Grid Item
-                            page.wait_for_selector("a[href^='/card#']", timeout=5000)
-                            logs.append("Found link selector. Clicking...")
-                            page.click("a[href^='/card#']", position={"x": 0, "y": 0})
+                            # Robust Text Click
+                            page.get_by_text(card_name, exact=False).first.click(timeout=3000)
+                            logs.append(f"Clicked text '{card_name}'.")
                             time.sleep(3)
                         except:
-                            logs.append("Context: Link selector NOT found. Dumping body snippet:")
-                            logs.append(page.inner_text("body")[:200])
-                            
+                            # Fallback to CSS
+                            try:
+                                page.click("a[href^='/card#']", timeout=2000)
+                                logs.append("Clicked generic card link.")
+                                time.sleep(3)
+                            except:
+                                logs.append("No link clicked (Maybe already on page?).")
+
                 except Exception as click_err:
-                    logs.append(f"Click Error: {click_err}")
+                    logs.append(f"Click logic warning: {click_err}")
 
                 # 2. Extract Text
                 logs.append("Extracting body text...")
                 full_text = page.inner_text("body")
                 logs.append(f"Body Length: {len(full_text)}")
                 
+                # Debug Dump if small
+                if len(full_text) < 200:
+                     logs.append(f"LOW CONTENT WARNING. Dump: {full_text}")                
                 if not full_text:
                     browser.close()
                     return None, "\n".join(logs)
