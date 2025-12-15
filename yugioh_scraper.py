@@ -739,28 +739,40 @@ class YuGiOhMetaScraper:
                 qa_lines = []
                 capture = False
                 
-                # HEURISTIC: Start capturing after seeing "Q&A", "Rulings", or big blocks of text
-                # For now, let's just dump paragraphs that contain the card name or seem relevant
-                # and skip short UI strings.
-                
                 start_capture = False
+                lines = full_text.split('\n')
+                qa_lines = []
+                
+                # Context Window Strategy:
+                # If we find a relevant line, we also want the NEXT few lines (the Answer).
+                capture_countdown = 0
+                
                 for line in lines:
                     line = line.strip()
                     if not line: continue
+                    if len(line) < 5: continue # Skip mostly empty noise
                     
-                    # Skip nav/footer noise
-                    if len(line) < 10: continue 
+                    # Check relevancy
+                    is_relevant = ("Question" in line) or ("Q:" in line) or (card_name.lower() in line.lower()) or ("activate" in line.lower())
                     
-                    # Capture if it mentions the card (approximate) or generic ruling terms
-                    # OR if we found a "Q&A" header recently.
-                    if "Question" in line or "Explanation" in line or card_name in line or "activate" in line:
-                         qa_lines.append(f"- {line}")
+                    if is_relevant:
+                        qa_lines.append(f"- {line}")
+                        capture_countdown = 3 # Capture next 3 lines blindly (expecting Answer)
+                    elif capture_countdown > 0:
+                        qa_lines.append(f"  {line}") # Indent context
+                        capture_countdown -= 1
                 
                 browser.close()
                 
                 if len(qa_lines) > 0:
-                    # Limit to first 20 lines to avoid spam
-                    return "\n".join(qa_lines[:20])
+                    # Return distinct lines to avoid duplication loop
+                    seen = set()
+                    final_lines = []
+                    for l in qa_lines:
+                        if l not in seen:
+                            final_lines.append(l)
+                            seen.add(l)
+                    return "\n".join(final_lines[:30]) # Limit output
                 else:
                     return None
                 

@@ -536,38 +536,72 @@ A: When Mirrorjade's effect resolves, you must attempt to banish a monster on th
                          if scraper:
                              # 3. Ciclo di Ricerca su TUTTE le carte trovate (Max 3)
                              found_rulings = []
-                             all_card_names = [c["name"].lower() for c in cards_to_check]
+                             
+                             # Simplify names for better matching: "Nibiru, the Primal Being" -> "nibiru"
+                             all_card_names_simple = [c["name"].split(',')[0].strip().lower() for c in cards_to_check]
+                             # Also keep full names for display/safety
                              
                              status_text = st.empty()
                              
                              for i, card in enumerate(cards_to_check[:3]):
                                 card_name = card["name"]
+                                # Simplify current card name too for self-exclusion logic
+                                card_simple = card_name.split(',')[0].strip().lower()
+                                
                                 status_text.info(f"⏳ Cerco ruling OCG per: **{card_name}**... ({i+1}/{len(cards_to_check[:3])})")
                                 
                                 try:
                                     text = scraper.search_ygoresources_ruling(card_name)
                                     if text:
                                         # 4. CROSS-REFERENCE FILTERING
-                                        # Se abbiamo più carte, cerchiamo ruling che menzionano le ALTRE carte.
-                                        # Se abbiamo solo 1 carta, mostriamo tutto.
-                                        
                                         if len(cards_to_check) > 1:
                                             relevant_lines = []
                                             lines = text.split('\n')
-                                            other_cards = [n for n in all_card_names if n != card_name.lower()]
+                                            
+                                            # We want lines that mention ANY of the OTHER cards (simplified names)
+                                            other_cards_simple = [n for n in all_card_names_simple if n != card_simple]
                                             
                                             for line in lines:
-                                                # Se la linea cita una delle altre carte, è ORO.
-                                                if any(other_card in line.lower() for other_card in other_cards):
+                                                line_lower = line.lower()
+                                                # Check if line mentions other cards
+                                                is_cross_ref = any(other in line_lower for other in other_cards_simple)
+                                                
+                                                if is_cross_ref:
                                                     relevant_lines.append(f"⭐ {line}")
-                                                # Oppure se è una Q&A generica
-                                                elif "Q:" in line or "Question" in line:
+                                                # Also keep clear Q&A lines to provide context if they are near a match
+                                                # (Our scraper now groups them, so we trust the scraper's context somewhat)
+                                                # But let's be permissive: if it's a Q/A block, show it?
+                                                # No, user wants SPECIFIC intersection.
+                                                # But if we strictly filter lines, we might lose "A: Yes."
+                                                # Let's rely on the scraper's new grouping (indentation).
+                                                # If a line is indented (Answer), keep it if previous was kept?
+                                                # Too complex. Let's just KEEP ALL if ANY match found in chunk?
+                                                # The scraper returns a big string.
+                                                
+                                                # Backtrack: User screenshot showed specific Q&A block.
+                                                # Let's just print lines that match + lines that look like Q/A structural parts?
+                                                # Simpler: If the text contains the other card name, SHOW THE WHOLE BLOCK or at least lines around it.
+                                                # Given scraper limitations, let's just show lines that match OR lines starting with Q/A.
+                                                elif "Q:" in line or "Question" in line or "A:" in line or "Answer" in line:
                                                      relevant_lines.append(line)
                                             
-                                            if relevant_lines:
-                                                 found_rulings.append(f"**{card_name}**:\n" + "\n".join(relevant_lines))
+                                            # Only append if we found actual cross-references (High Highlighting)
+                                            # OR if we found a Q&A block that contains the other card name in the full text?
+                                            # Let's check the FULL text for cross-reference first.
+                                            
+                                            if any(other in text.lower() for other in other_cards_simple):
+                                                 # The TEXT mentions the other card. Good!
+                                                 # Now highlight relevant parts.
+                                                 found_rulings.append(f"**{card_name}** (Found interactions):\n{text}")
+                                            else:
+                                                 # No mention of other cards. Skip to reduce noise?
+                                                 # Or show if it's the only info we have? 
+                                                 # User wants logic "cerca una alla volta... e vedere se trova ruling specifici che trattano la/e altra/e".
+                                                 # So if NO cross ref, DON'T show?
+                                                 pass
+
                                         else:
-                                            # Solo 1 carta coinvolta, mostra tutto
+                                            # Single card context
                                             found_rulings.append(f"**{card_name}**:\n{text}")
                                             
                                 except Exception as e:
