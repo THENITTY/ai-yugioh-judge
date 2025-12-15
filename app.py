@@ -429,6 +429,10 @@ if mode == "👨‍⚖️ AI Judge":
                 
                 if total_cards > 0:
                     progress_bar.progress((idx + 1) / total_cards)
+        
+        # PERSIST DATA FOR BUTTONS
+        st.session_state.found_cards_cache = found_cards_data      
+
         with st.spinner("Generazione verdetto in corso..."):
             
             # USE STANDARD RESOLVED MODEL
@@ -507,34 +511,79 @@ A: When Mirrorjade's effect resolves, you must attempt to banish a monster on th
             col_sc, col_new = st.columns([2, 1])
             with col_sc:
                 if st.button("🔍 Consulta YGO Resources (OCG Rulings)"):
-                    card_to_search = None
-                    if 'found_cards' in locals() and found_cards:
-                         card_to_search = found_cards[0]['name']
-                    elif st.session_state.question_text:
-                         card_to_search = st.session_state.question_text[:30] # Try with question snippet? risky
                     
-                    if card_to_search:
-                         with st.spinner(f"Cerco ruling OCG per '{card_to_search}' su db.ygoresources.com... (richiede ~10s)"):
-                             try:
-                                 # FORCE RELOAD to avoid Streamlit caching issues with new methods
-                                 import importlib
-                                 import yugioh_scraper
-                                 importlib.reload(yugioh_scraper)
-                                 from yugioh_scraper import YuGiOhMetaScraper
-                                 
-                                 scraper = YuGiOhMetaScraper()
-                                 rulings_text = scraper.search_ygoresources_ruling(card_to_search)
-                                 
-                                 if rulings_text:
-                                     st.info(f"📜 **Ruling OCG Trovati per '{card_to_search}':**")
-                                     st.code(rulings_text, language="text")
-                                     st.toast("Ruling trovati! Rileggili e valuta se cambia il verdetto.")
-                                 else:
-                                     st.warning(f"Nessun ruling specifico trovato per '{card_to_search}'.")
-                             except Exception as e:
-                                 st.error(f"Errore durante la ricerca: {e}")
+                    # 1. Recupera carte identificate (dalla cache persistente)
+                    cards_to_check = st.session_state.get("found_cards_cache", [])
+                    
+                    # Fallback se la cache è vuota
+                    if not cards_to_check and st.session_state.question_text:
+                        # Fallback rischioso: usa parole chiave dalla domanda se breve
+                        if len(st.session_state.question_text) < 40:
+                             cards_to_check = [{"name": st.session_state.question_text}]
+                    
+                    if cards_to_check:
+                         # 2. Setup Scraper con Reload
+                         try:
+                             import importlib
+                             import yugioh_scraper
+                             importlib.reload(yugioh_scraper)
+                             from yugioh_scraper import YuGiOhMetaScraper
+                             scraper = YuGiOhMetaScraper()
+                         except Exception as e:
+                             st.error(f"Errore caricamento modulo: {e}")
+                             scraper = None
+
+                         if scraper:
+                             # 3. Ciclo di Ricerca su TUTTE le carte trovate (Max 3)
+                             found_rulings = []
+                             all_card_names = [c["name"].lower() for c in cards_to_check]
+                             
+                             status_text = st.empty()
+                             
+                             for i, card in enumerate(cards_to_check[:3]):
+                                card_name = card["name"]
+                                status_text.info(f"⏳ Cerco ruling OCG per: **{card_name}**... ({i+1}/{len(cards_to_check[:3])})")
+                                
+                                try:
+                                    text = scraper.search_ygoresources_ruling(card_name)
+                                    if text:
+                                        # 4. CROSS-REFERENCE FILTERING
+                                        # Se abbiamo più carte, cerchiamo ruling che menzionano le ALTRE carte.
+                                        # Se abbiamo solo 1 carta, mostriamo tutto.
+                                        
+                                        if len(cards_to_check) > 1:
+                                            relevant_lines = []
+                                            lines = text.split('\n')
+                                            other_cards = [n for n in all_card_names if n != card_name.lower()]
+                                            
+                                            for line in lines:
+                                                # Se la linea cita una delle altre carte, è ORO.
+                                                if any(other_card in line.lower() for other_card in other_cards):
+                                                    relevant_lines.append(f"⭐ {line}")
+                                                # Oppure se è una Q&A generica
+                                                elif "Q:" in line or "Question" in line:
+                                                     relevant_lines.append(line)
+                                            
+                                            if relevant_lines:
+                                                 found_rulings.append(f"**{card_name}**:\n" + "\n".join(relevant_lines))
+                                        else:
+                                            # Solo 1 carta coinvolta, mostra tutto
+                                            found_rulings.append(f"**{card_name}**:\n{text}")
+                                            
+                                except Exception as e:
+                                    print(f"Skip {card_name}: {e}")
+
+                             status_text.empty()
+                             
+                             if found_rulings:
+                                 st.info("📜 **Rulings OCG Trovati (Cross-References):**")
+                                 final_text = "\n\n".join(found_rulings)
+                                 st.code(final_text, language="text")
+                                 st.toast("Ruling trovati! Valuta se cambia il verdetto.")
+                             else:
+                                 st.warning(f"Nessun ruling specifico incrociato trovato per le carte: {', '.join([c['name'] for c in cards_to_check])}.")
                     else:
-                         st.warning("Nessuna carta identificata per la ricerca.")
+                         st.warning("Nessuna carta identificata per la ricerca. Riprova a formulare la domanda.")
 
             with col_new:
                 if st.button("Nuova Domanda 🔄"):
