@@ -95,15 +95,19 @@ def analyze_image_for_cards(model, image):
     COMPITO:
     Analizza questa foto del tavolo da gioco. Identifica le carte visibili.
     
-    ISTRUZIONI CRITICHE:
-    1. Restituisci SOLO i nomi delle carte di cui sei SICURO al 100%.
-    2. Usa il colore del bordo per capire il tipo (Blu=Link, Nero=Xyz, Bianco=Synchro, Viola=Fusione).
-    3. Se vedi solo un pezzo di nome, cerca di dedurre la carta più famosa e probabile del meta attuale.
-    4. NON INVENTARE NOMI. Se non la riconosci, ignorala.
+    STRATEGIA MIGLIORE (OCR):
+    1. PROVA A LEGGERE IL NOME stampato sulla carta (in alto). È la fonte più affidabile.
+    2. Se il nome è sfocato, guarda l'artwork e il colore del bordo (Nero=Xyz, Blu=Link, etc).
+    3. Combina lettura parziale ("Sky Crisis") + artwork per dedurre "Super Starslayer TY-PHON - Sky Crisis".
+    
+    ISTRUZIONI:
+    - Restituisci SOLO i nomi ufficiali inglesi.
+    - Se leggi "Ripper" e vedi un mostro XYZ, deduci il nome completo se lo sai, altrimenti scrivi solo ciò che leggi.
+    - NON INVENTARE NOMI che non esistono.
     
     Output richiesto:
-    Lista JSON di stringhe coi nomi esatti in inglese.
-    Esempio: ["Linguriboh", "Backup Secretary", "Number 41: Bagooska"]
+    Lista JSON di stringhe.
+    Esempio: ["Super Starslayer TY-PHON - Sky Crisis", "Linguriboh", "K9-17 Ripper"]
     """
     
     try:
