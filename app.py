@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from duckduckgo_search import DDGS
 from yugioh_scraper import YuGiOhMetaScraper
+from PIL import Image
 
 # Carica variabili d'ambiente da .env se presente
 load_dotenv()
@@ -84,6 +85,42 @@ def extract_cards(model, user_question):
             return json.loads(json_str)
         return []
     except Exception:
+        return []
+
+def analyze_image_for_cards(model, image):
+    """Analizza un'immagine con Gemini Vision per trovare carte."""
+    prompt = """
+    Sei un esperto di Yu-Gi-Oh!.
+    
+    COMPITO:
+    Analizza questa immagine. Identifica TUTTE le carte di Yu-Gi-Oh! visibili (Mostri, Magie, Trappole).
+    
+    Output richiesto:
+    Restituisci SOLO una lista JSON di stringhe con i nomi ufficiali inglesi delle carte che riesci a identificare.
+    Esempio: ["Baronne de Fleur", "Mirrorjade the Iceblade Dragon"]
+    
+    Se non sei sicuro di una carta, descrivila o prova a indovinare dal colore/artwork, ma cerca di fornire il nome più probabile.
+    """
+    
+    try:
+        response = model.generate_content([prompt, image])
+        response_text = response.text
+        
+        # Cleanup Markdown
+        cleaned_text = response_text.replace("```json", "").replace("```", "").strip()
+        
+        start = cleaned_text.find('[')
+        end = cleaned_text.rfind(']') + 1
+        if start != -1 and end != -1:
+            json_str = cleaned_text[start:end]
+            return json.loads(json_str)
+        
+        # Return raw text if parsing fails (for debugging)
+        return [{"error": "parsing_failed", "raw": response_text}]
+    except Exception as e:
+        st.error(f"Errore Vision: {e}")
+        return []
+        st.error(f"Errore Vision: {e}")
         return []
 
 def scrape_deck_list(deck_url):
@@ -358,17 +395,60 @@ if mode == "👨‍⚖️ AI Judge":
             height=150
         )
         
-        if st.button("Analizza Scenario 🔍", type="primary"):
-            if not manual_selection:
-                st.warning("Per favore seleziona almeno una carta dalla lista.")
-            else:
-                st.session_state.question_text = question_input
-                st.session_state.manual_added_cards = manual_selection
-                
-                # Modalità strettamente manuale: usiamo solo le carte selezionate
-                st.session_state.detected_cards = list(set(manual_selection))
-                st.session_state.step = 2
-                st.rerun()
+        # --- NEW: Image Upload ---
+        st.subheader("3. Analisi Foto Campo 📸 (BETA)")
+        uploaded_file = st.file_uploader("Carica una foto del terreno di gioco:", type=["jpg", "jpeg", "png"])
+        
+        col_btn1, col_btn2 = st.columns(2)
+        
+        with col_btn1:
+            if st.button("Analizza Scenario (Testo) 🔍", type="primary"):
+                if not manual_selection and not question_input:
+                     st.warning("Scrivi qualcosa o seleziona una carta.")
+                else:
+                     st.session_state.question_text = question_input
+                     # Se c'è testo ma no selezione manuale, prova a estrarre dal testo? 
+                     # Semplifichiamo: Manuale ha priorità.
+                     st.session_state.detected_cards = list(set(manual_selection))
+                     st.session_state.step = 2
+                     st.rerun()
+
+        with col_btn2:
+            if uploaded_file is not None:
+                if st.button("Analizza FOTO + Testo 🧠📸"):
+                    with st.spinner("👀 L'AI sta guardando la foto..."):
+                         try:
+                             image = Image.open(uploaded_file)
+                             
+                             # 1. Vision Analysis
+                             vision_cards = []
+                             vision_model, _name = resolve_working_model()
+                             vision_response = analyze_image_for_cards(vision_model, image)
+                             
+                             # Check for errors/raw text first
+                             if vision_response and isinstance(vision_response[0], dict) and "error" in vision_response[0]:
+                                 st.warning("⚠️ L'AI ha risposto ma non sono riuscito a leggere la lista carte.")
+                                 with st.expander("🛠 Vedi Risposta Grezza AI"):
+                                     st.write(vision_response[0]["raw"])
+                                 vision_cards = []
+                             else:
+                                 vision_cards = vision_response
+                             
+                             if vision_cards:
+                                 st.toast(f"Trovate {len(vision_cards)} carte dalla foto!")
+                             else:
+                                 st.warning("Non ho trovato carte sicure nella foto.")
+                                 
+                             # 2. Merge everything
+                             total_cards = list(set(manual_selection + vision_cards))
+                             
+                             st.session_state.question_text = question_input
+                             st.session_state.detected_cards = total_cards
+                             st.session_state.step = 2
+                             st.rerun()
+                             
+                         except Exception as e:
+                             st.error(f"Errore caricamento immagine: {e}")
 
     # --- STEP 2: Verifica Carte ---
     elif st.session_state.step == 2:
