@@ -440,8 +440,7 @@ if mode == "👨‍⚖️ AI Judge":
     
             REGOLAMENTO CRITICO:
             - **Damage Step**: Sii ESTREMAMENTE severo. Solo carte che modificano direttamente ATK/DEF, Counter Traps, o effetti che negano specificamente *l'attivazione* (non l'effetto) possono essere attivate qui.
-            - **Condizioni di Gioco (Game State)**: Se una carta ha restrizioni (es. "You can only control 1"), NON puoi attivare effetti che violerebbero quella restrizione al momento della risoluzione. (Es. Mind Control su un mostro che già controlli o di cui hai già una copia se limitata).
-            - **Esempio Mind Control**: Se controlli "Mirrorjade" e l'avversario ha "Mirrorjade", e Mirrorjade dice "You can only control 1", NON puoi attivare Mind Control sul Mirrorjade avversario, perché alla risoluzione controlleresti 2 copie. È una mossa illegale.
+            - **Condizioni di Gioco (Game State)**: Verifica sempre se l'azione è permessa dallo stato attuale del gioco (es. numero massimo di mostri, carte "You can only control 1", ecc.).
     
             TESTI UFFICIALI (Fonte di Verità):
             ---
