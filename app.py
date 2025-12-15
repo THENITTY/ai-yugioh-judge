@@ -516,6 +516,12 @@ A: When Mirrorjade's effect resolves, you must attempt to banish a monster on th
                     if card_to_search:
                          with st.spinner(f"Cerco ruling OCG per '{card_to_search}' su db.ygoresources.com... (richiede ~10s)"):
                              try:
+                                 # FORCE RELOAD to avoid Streamlit caching issues with new methods
+                                 import importlib
+                                 import yugioh_scraper
+                                 importlib.reload(yugioh_scraper)
+                                 from yugioh_scraper import YuGiOhMetaScraper
+                                 
                                  scraper = YuGiOhMetaScraper()
                                  rulings_text = scraper.search_ygoresources_ruling(card_to_search)
                                  

@@ -739,14 +739,30 @@ class YuGiOhMetaScraper:
                 qa_lines = []
                 capture = False
                 
+                # HEURISTIC: Start capturing after seeing "Q&A", "Rulings", or big blocks of text
+                # For now, let's just dump paragraphs that contain the card name or seem relevant
+                # and skip short UI strings.
+                
+                start_capture = False
                 for line in lines:
                     line = line.strip()
-                    if "Q:" in line or "Question" in line:
-                         capture = True
+                    if not line: continue
                     
-                    if capture:
-                        qa_lines.append(line)
-                        # Heuristic to stop capturing? No, grab all.
+                    # Skip nav/footer noise
+                    if len(line) < 10: continue 
+                    
+                    # Capture if it mentions the card (approximate) or generic ruling terms
+                    # OR if we found a "Q&A" header recently.
+                    if "Question" in line or "Explanation" in line or card_name in line or "activate" in line:
+                         qa_lines.append(f"- {line}")
+                
+                browser.close()
+                
+                if len(qa_lines) > 0:
+                    # Limit to first 20 lines to avoid spam
+                    return "\n".join(qa_lines[:20])
+                else:
+                    return None
                 
                 browser.close()
                 
