@@ -429,36 +429,57 @@ if mode == "👨‍⚖️ AI Judge":
                 
                 if total_cards > 0:
                     progress_bar.progress((idx + 1) / total_cards)
-        
         with st.spinner("Generazione verdetto in corso..."):
+            
+            # USE STANDARD RESOLVED MODEL
+            judge_model, model_name = resolve_working_model()
+
+            # RULING UFFICIALI AGGIUNTIVE (YGOProDeck / Konami Database)
+            # Inserito manualmente per gestire casi complessi come Mind Control vs Mirrorjade
+            extra_rulings_db = """
+Q: Both players control a face-up Mirrorjade the Iceblade Dragon. Can I activate Mind Control targeting my opponent's copy of Mirrorjade? If yes, what happens when it resolves?
+A: You can activate Mind Control. If you still control a face-up Mirrorjade when Mind Control resolves, you take control of your opponent's Mirrorjade, and it is then immediately destroyed.
+            
+Q: I control a face-up Mirrorjade the Iceblade Dragon. Can I use Polymerization to Fusion Summon another copy of Mirrorjade the Iceblade Dragon, using the copy on my field as material?
+A: No, you cannot. You can only control 1 face-up "Mirrorjade the Iceblade Dragon", and cannot attempt to Summon another copy if you already do.
+
+Q: If Mirrorjade's Quick Effect is negated, or its activation is negated, can that Mirrorjade use that effect again the next turn?
+A: Yes. This card cannot use this effect next turn is part of Mirrorjade's effect. If Mirrorjade's effect, or its activation, is negated, the entire effect is not applied, including that part.
+
+Q: I activate Mirrorjade's Quick Effect. In response, the effect of my opponent's Destiny HERO - Destroyer Phoenix Enforcer resolves, destroying both it and another card on my field. If Mirrorjade is the only monster on the field when its Quick Effect resolves, what happens?
+A: When Mirrorjade's effect resolves, you must attempt to banish a monster on the field. If Mirrorjade is the only monster on the field that you can attempt to banish, you must banish Mirrorjade itself.
+"""
+
             prompt_ruling = f"""
             Sei un **HEAD JUDGE UFFICIALE DI YU-GI-OH** (Livello 3).
             Il tuo compito è emettere ruling tecnici estremamente precisi e pignoli.
     
             REGOLAMENTO CRITICO:
-            - **Damage Step**: Sii ESTREMAMENTE severo. Solo carte che modificano direttamente ATK/DEF, Counter Traps, o effetti che negano specificamente *l'attivazione* (non l'effetto) possono essere attivate qui (salvo eccezioni esplicite).
-            - **Esempio Pignolo**: "Ash Blossom & Joyous Spring" NEGA L'EFFETTO, NON l'attivazione. Quindi NON PUÒ quasi mai essere usata nel Damage Step. Se l'utente chiede questo, devi dire di NO e spiegare brutalmente perché.
-            - **Conjunctions**: Fai attenzione a "E", "ANCHE SE", "POI".
-            - **Spell Speed**: Rispetta rigorosamente le velocità di attivazione.
+            - **Damage Step**: Sii ESTREMAMENTE severo. Solo carte che modificano direttamente ATK/DEF, Counter Traps, o effetti che negano specificamente *l'attivazione* (non l'effetto) possono essere attivate qui.
+            - **Condizioni di Gioco (Game State)**: Verifica sempre se l'azione è permessa dallo stato attuale del gioco.
     
             TESTI UFFICIALI (Fonte di Verità):
             ---
             {cards_context}
             ---
+            
+            DATABASE RULING EXTRA (PRECEDENZA ASSOLUTA):
+            {extra_rulings_db}
+            ---
     
             SCENARIO UTENTE:
             "{st.session_state.question_text}"
-    
+            
             ISTRUZIONI:
             1. Analizza lo scenario cercando cavilli legali.
             2. Se la mossa è illegale, dillo chiaramente.
-            3. Usa terminologia ufficiale (Activation, Resolution, SEGOC, Turn Player Priority).
+            3. RAGIONA PASSO-PASSO prima di rispondere.
             
             FORMATO RISPOSTA RICHIESTO:
             Devi dividere la risposta in due parti separate da una riga con scritto esattamente "---DETTAGLI---".
             
             Parte 1 (Prima di ---DETTAGLI---):
-            - Risposta diretta e concisa (es: "Sì, [Carta X] nega [Carta Y]" oppure "No, mossa illegale").
+            - Risposta diretta e concisa (es: "Sì, legale" oppure "No, mossa illegale").
             
             ---DETTAGLI---
             
