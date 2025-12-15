@@ -743,24 +743,29 @@ class YuGiOhMetaScraper:
                         logs.append("Browsing results list...")
                         # Try to click the specific card
                         try:
-                            # Use exact=True first for high precision
+                            # 1. Exact Text Match
                             link = page.get_by_text(card_name, exact=True)
                             if link.count() > 0:
                                 link.first.click()
                                 logs.append(f"Clicked exact text '{card_name}'.")
                             else:
-                                # Fallback to fuzzy
-                                page.get_by_text(card_name, exact=False).first.click(timeout=3000)
-                                logs.append(f"Clicked fuzzy text '{card_name}'.")
+                                # 2. Fuzzy Text Match
+                                link_fuzzy = page.get_by_text(card_name, exact=False)
+                                if link_fuzzy.count() > 0:
+                                    link_fuzzy.first.click()
+                                    logs.append(f"Clicked fuzzy text '{card_name}'.")
+                                else:
+                                    # 3. BLIND FALLBACK: Click the first link that looks like a card
+                                    # This is crucial if name formatting differs (e.g. "Monster" tag)
+                                    logs.append("Text match failed. Attempting blind click on first result...")
+                                    page.locator("a[href^='/card']").first.click()
+                                    logs.append("Clicked first available card link.")
+                            
                             time.sleep(3)
-                        except:
-                            # Fallback to CSS
-                            try:
-                                page.click("a[href^='/card#']", timeout=2000)
-                                logs.append("Clicked generic card link.")
-                                time.sleep(3)
-                            except:
-                                logs.append("No link clicked (Maybe already on page?).")
+                        except Exception as pick_err:
+                            logs.append(f"Result Picking Error: {pick_err}")
+                            # Last ditch: dump the HTML of the list to see what went wrong
+                            # logs.append(page.content()[:500])
 
                 except Exception as click_err:
                     logs.append(f"Click logic warning: {click_err}")
