@@ -436,11 +436,27 @@ if mode == "👨‍⚖️ AI Judge":
                              # Check for errors/raw text first
                              if vision_response and isinstance(vision_response[0], dict) and "error" in vision_response[0]:
                                  st.warning("⚠️ L'AI ha risposto ma non sono riuscito a leggere la lista carte.")
-                                 with st.expander("🛠 Vedi Risposta Grezza AI"):
-                                     st.write(vision_response[0]["raw"])
                                  vision_cards = []
                              else:
-                                 vision_cards = vision_response
+                                 # --- FUZZY MATCHING CORRECTION ---
+                                 import difflib
+                                 vision_cards_corrected = []
+                                 
+                                 for raw_name in vision_response:
+                                     # Try exact match first
+                                     if raw_name in all_card_names:
+                                         vision_cards_corrected.append(raw_name)
+                                     else:
+                                         # Try Fuzzy Match
+                                         matches = difflib.get_close_matches(raw_name, all_card_names, n=1, cutoff=0.5)
+                                         if matches:
+                                             st.toast(f"Corretto: {raw_name} -> {matches[0]}")
+                                             vision_cards_corrected.append(matches[0])
+                                         else:
+                                             # Keep raw if no match found (user can fix manually)
+                                             vision_cards_corrected.append(raw_name)
+                                 
+                                 vision_cards = vision_cards_corrected
                              
                              if vision_cards:
                                  st.toast(f"Trovate {len(vision_cards)} carte dalla foto!")
