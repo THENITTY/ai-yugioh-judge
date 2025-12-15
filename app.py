@@ -560,47 +560,67 @@ A: When Mirrorjade's effect resolves, you must attempt to banish a monster on th
                                         cross_ref_keywords=other_cards_simple if len(cards_to_check) > 1 else None
                                     )
                                     
-                                    if text_res:
-                                        # 4. CROSS-REFERENCE FILTERING
-                                        if len(cards_to_check) > 1:
-                                            relevant_lines = []
-                                            lines = text_res.split('\n')
-                                            
-                                            # We want lines that mention ANY of the OTHER cards (simplified names)
-                                            other_cards_simple = [n for n in all_card_names_simple if n != card_simple]
-                                            
-                                            for line in lines:
-                                                line_lower = line.lower()
-                                                is_cross_ref = any(other in line_lower for other in other_cards_simple)
-                                                
-                                                if is_cross_ref:
-                                                    relevant_lines.append(f"⭐ {line}")
-                                                elif "Q:" in line or "Question" in line:
-                                                     relevant_lines.append(line)
-                                            
-                                            if any(other in text_res.lower() for other in other_cards_simple):
-                                                 found_rulings.append(f"**{card_name}** (Found interactions):\n{text_res}")
-                                            else:
-                                                 pass
+                                 if found_rulings:
+                                     st.info("📜 **Rulings OCG Trovati (Cross-References):**")
+                                     final_ruling_text = "\n\n".join(found_rulings)
+                                     st.code(final_ruling_text, language="text")
+                                     
+                                     # --- NEW: AUTO-REEVALUATION ---
+                                     st.markdown("### 🧠 Rivalutazione con Ruling OCG...")
+                                     with st.spinner("Il Giudice sta rileggendo il caso alla luce dei nuovi ruling..."):
+                                         try:
+                                             # Re-construct context from session state
+                                             cards_context_reval = ""
+                                             # We need the full card text context again. 
+                                             # It might be in st.session_state.found_cards_cache
+                                             cached_cards = st.session_state.get("found_cards_cache", [])
+                                             for c in cached_cards:
+                                                  cards_context_reval += f"NOME UFFICIALE: {c['name']}\nTESTO: {c['desc']}\n\n"
+                                             
+                                             judge_model, model_name = resolve_working_model()
+                                             
+                                             reval_prompt = f"""
+                                             SEI UN HEAD JUDGE DI YU-GI-OH.
+                                             
+                                             SITUAZIONE PRECEDENTE:
+                                             Hai dato un verdetto su una domanda dell'utente.
+                                             Tuttavia, sono stati appena trovati dei **RULING UFFICIALI OCG (Giapponesi)** specifici per questo caso.
+                                             
+                                             I ruling OCG hanno la precedenza tecnica su qualsiasi logica generale.
+                                             
+                                             TESTO CARTE:
+                                             {cards_context_reval}
+                                             
+                                             NUOVI RULING TROVATI (EVIDENZA CRITICA):
+                                             ---
+                                             {final_ruling_text}
+                                             ---
+                                             
+                                             DOMANDA UTENTE:
+                                             "{st.session_state.question_text}"
+                                             
+                                             COMPITO:
+                                             1. Leggi attentamente i nuovi ruling trovati.
+                                             2. Se contraddicono la tua logica precedente, AMMETTILO e correggi il verdetto.
+                                             3. Se confermano la tua logica, usali come prova definitiva.
+                                             4. Fornisci un verdetto finale SINTETICO ma TECNICO.
+                                             
+                                             FORMATO RISPOSTA:
+                                             "Verdetto Aggiornato: [Sì/No/Dipende]"
+                                             "Spiegazione: [Spiegazione tecnica citando il ruling]"
+                                             """
+                                             
+                                             reval_response = judge_model.generate_content(reval_prompt)
+                                             
+                                             st.success("Verdetto Aggiornato (Basato su OCG):")
+                                             st.write(reval_response.text)
+                                             st.toast("Verdetto aggiornato con successo!")
+                                             
+                                         except Exception as reval_e:
+                                             st.error(f"Errore durante la rivalutazione: {reval_e}")
 
-                                        else:
-                                            found_rulings.append(f"**{card_name}**:\n{text_res}")
-                                    else:
-                                        print(f"DEBUG: Scraper returned None for {card_name}")
-                                            
-                                except Exception as e:
-                                    print(f"Skip {card_name}: {e}")
-                                    debug_log_res = f"Exception: {e}"
-
-                             status_text.empty()
-                             
-                             if found_rulings:
-                                 st.info("📜 **Rulings OCG Trovati (Cross-References):**")
-                                 final_text = "\n\n".join(found_rulings)
-                                 st.code(final_text, language="text")
-                                 st.toast("Ruling trovati! Valuta se cambia il verdetto.")
-                             else:
-                                 st.warning(f"Nessun ruling specifico incrociato trovato per: {', '.join([c['name'] for c in cards_to_check])}.")
+                                 else:
+                                     st.warning(f"Nessun ruling specifico incrociato trovato per: {', '.join([c['name'] for c in cards_to_check])}.")
                                  
                                  # DEBUG AREA - Only shown on failure
                                  with st.expander("🐛 Debug Data (Clicca se non trovi nulla)"):
