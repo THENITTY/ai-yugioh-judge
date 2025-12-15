@@ -551,63 +551,40 @@ A: When Mirrorjade's effect resolves, you must attempt to banish a monster on th
                                 status_text.info(f"⏳ Cerco ruling OCG per: **{card_name}**... ({i+1}/{len(cards_to_check[:3])})")
                                 
                                 try:
-                                    text = scraper.search_ygoresources_ruling(card_name)
-                                    if text:
+                                    # Modified Scraper returns (text, log) tuple
+                                    text_res, debug_log_res = scraper.search_ygoresources_ruling(card_name)
+                                    
+                                    if text_res:
                                         # 4. CROSS-REFERENCE FILTERING
                                         if len(cards_to_check) > 1:
                                             relevant_lines = []
-                                            lines = text.split('\n')
+                                            lines = text_res.split('\n')
                                             
                                             # We want lines that mention ANY of the OTHER cards (simplified names)
                                             other_cards_simple = [n for n in all_card_names_simple if n != card_simple]
                                             
                                             for line in lines:
                                                 line_lower = line.lower()
-                                                # Check if line mentions other cards
                                                 is_cross_ref = any(other in line_lower for other in other_cards_simple)
                                                 
                                                 if is_cross_ref:
                                                     relevant_lines.append(f"⭐ {line}")
-                                                # Also keep clear Q&A lines to provide context if they are near a match
-                                                # (Our scraper now groups them, so we trust the scraper's context somewhat)
-                                                # But let's be permissive: if it's a Q/A block, show it?
-                                                # No, user wants SPECIFIC intersection.
-                                                # But if we strictly filter lines, we might lose "A: Yes."
-                                                # Let's rely on the scraper's new grouping (indentation).
-                                                # If a line is indented (Answer), keep it if previous was kept?
-                                                # Too complex. Let's just KEEP ALL if ANY match found in chunk?
-                                                # The scraper returns a big string.
-                                                
-                                                # Backtrack: User screenshot showed specific Q&A block.
-                                                # Let's just print lines that match + lines that look like Q/A structural parts?
-                                                # Simpler: If the text contains the other card name, SHOW THE WHOLE BLOCK or at least lines around it.
-                                                # Given scraper limitations, let's just show lines that match OR lines starting with Q/A.
-                                                elif "Q:" in line or "Question" in line or "A:" in line or "Answer" in line:
+                                                elif "Q:" in line or "Question" in line:
                                                      relevant_lines.append(line)
                                             
-                                            # Only append if we found actual cross-references (High Highlighting)
-                                            # OR if we found a Q&A block that contains the other card name in the full text?
-                                            # Let's check the FULL text for cross-reference first.
-                                            
-                                            if any(other in text.lower() for other in other_cards_simple):
-                                                 # The TEXT mentions the other card. Good!
-                                                 # Now highlight relevant parts.
-                                                 found_rulings.append(f"**{card_name}** (Found interactions):\n{text}")
+                                            if any(other in text_res.lower() for other in other_cards_simple):
+                                                 found_rulings.append(f"**{card_name}** (Found interactions):\n{text_res}")
                                             else:
-                                                 # No mention of other cards. Skip to reduce noise?
-                                                 # Or show if it's the only info we have? 
-                                                 # User wants logic "cerca una alla volta... e vedere se trova ruling specifici che trattano la/e altra/e".
-                                                 # So if NO cross ref, DON'T show?
                                                  pass
 
                                         else:
-                                            # Single card context
-                                            found_rulings.append(f"**{card_name}**:\n{text}")
+                                            found_rulings.append(f"**{card_name}**:\n{text_res}")
                                     else:
                                         print(f"DEBUG: Scraper returned None for {card_name}")
                                             
                                 except Exception as e:
                                     print(f"Skip {card_name}: {e}")
+                                    debug_log_res = f"Exception: {e}"
 
                              status_text.empty()
                              
@@ -624,12 +601,17 @@ A: When Mirrorjade's effect resolves, you must attempt to banish a monster on th
                                      st.write("Dati estratti dal scraper:")
                                      st.write(f"- Carte cercate: {all_card_names_simple}")
                                      st.write(f"- Metodo Scraper Reloaded: {'search_ygoresources_ruling' in dir(scraper)}")
-                                     # Force run one search to show raw content for debug
+                                     
                                      test_name = cards_to_check[0]["name"]
-                                     st.write(f"- Test Raw Dump per '{test_name}':")
+                                     st.write(f"- Test Run per '{test_name}':")
                                      try:
-                                          raw = scraper.search_ygoresources_ruling(test_name)
-                                          st.text(raw if raw else "None returned")
+                                          # Use the log captured during loop if available, else re-run
+                                          if 'debug_log_res' in locals():
+                                               st.text(debug_log_res)
+                                          else:
+                                               # Re-run if we didn't capture the log (e.g. exception before call)
+                                               _, fresh_log = scraper.search_ygoresources_ruling(test_name)
+                                               st.text(fresh_log)
                                      except Exception as ex:
                                           st.error(str(ex))
                                      

@@ -674,7 +674,7 @@ class YuGiOhMetaScraper:
     def search_ygoresources_ruling(self, card_name):
         """
         Searches db.ygoresources.com for a card and extracts its rulings.
-        Returns the text of the rulings or None.
+        Returns (text, debug_log_string).
         """
         from playwright.sync_api import sync_playwright
         import urllib.parse
@@ -683,7 +683,7 @@ class YuGiOhMetaScraper:
         encoded_name = urllib.parse.quote(card_name)
         search_url = f"https://db.ygoresources.com/search?name={encoded_name}&view=card"
         
-        print(f"DEBUG: Searching YGO Resources for: {card_name}")
+        logs = [f"Init Search: {card_name}", f"URL: {search_url}"]
 
         try:
             with sync_playwright() as p:
@@ -692,98 +692,86 @@ class YuGiOhMetaScraper:
                     args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
                 )
                 page = browser.new_page()
-                page.goto(search_url, timeout=45000)
                 
-                # 1. Wait for Results
-                # The search results are typically rows in a table or list
-                # We try to click the first link that looks like a card detail
-                try:
-                    # Generic selector for the first result link in their table
-                    # Usually: tr > td > a
-                    # Or check if we are redirected directly to the card (depends on exact match)
-                    
-                    # Wait a bit for JS to render results
-                    time.sleep(3)
-                    
-                    # Check if we are already on a card page (URL contains /card#)
-                    if "/card#" in page.url:
-                        print("DEBUG: Direct hit on card page.")
-                    else:
-                        # Attempt to click valid result
-                        # Selector might need adjustment based on site structure
-                        # Looking for an anchor in main content area
-                        page.wait_for_selector("a[href^='/card#']", timeout=10000)
-                        page.click("a[href^='/card#']", position={"x": 0, "y": 0})
-                        time.sleep(3)
-                
-                except Exception as click_err:
-                    print(f"DEBUG: Could not click result or already on page: {click_err}")
-                    pass # Continue hoping we are on the page
+                # Set User Agent to resemble a real browser
+                page.set_extra_http_headers({
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                })
 
-                # 2. Extract Rulings (FAQ)
-                # Look for "FAQ" section or "Q&A" text
-                # Site structure usually has tabs or sections.
+                logs.append("Navigating...")
+                try:
+                    page.goto(search_url, timeout=30000)
+                    page.wait_for_load_state("networkidle") # Wait for network to settle
+                except Exception as nav_e:
+                    logs.append(f"Nav Error: {nav_e}")
                 
-                # Extract all text and then filter?
-                # Or look for specific container.
-                
-                # Let's grab the whole body text and filter for Q&A pattern
+                # Check where we are
+                logs.append(f"Current URL: {page.url}")
+                logs.append(f"Page Title: {page.title()}")
+
+                # 1. Handle Navigation / Clicking
+                try:
+                    time.sleep(2) # Grace period for JS
+                    
+                    if "/card#" in page.url:
+                        logs.append("Directly on card page.")
+                    else:
+                        logs.append("Searching for card link in list...")
+                        # Try multiple selectors
+                        try:
+                            # Standard Grid Item
+                            page.wait_for_selector("a[href^='/card#']", timeout=5000)
+                            logs.append("Found link selector. Clicking...")
+                            page.click("a[href^='/card#']", position={"x": 0, "y": 0})
+                            time.sleep(3)
+                        except:
+                            logs.append("Context: Link selector NOT found. Dumping body snippet:")
+                            logs.append(page.inner_text("body")[:200])
+                            
+                except Exception as click_err:
+                    logs.append(f"Click Error: {click_err}")
+
+                # 2. Extract Text
+                logs.append("Extracting body text...")
                 full_text = page.inner_text("body")
+                logs.append(f"Body Length: {len(full_text)}")
                 
                 if not full_text:
                     browser.close()
-                    return None
-                
-                # Filter for lines looking like Q: ... A: ...
-                lines = full_text.split('\n')
-                qa_lines = []
-                capture = False
+                    return None, "\n".join(logs)
                 
                 start_capture = False
                 lines = full_text.split('\n')
                 qa_lines = []
                 
-                # Context Window Strategy:
-                # If we find a relevant line, we also want the NEXT few lines (the Answer).
+                # Context Window Strategy
                 capture_countdown = 0
                 
                 for line in lines:
                     line = line.strip()
                     if not line: continue
-                    if len(line) < 5: continue # Skip mostly empty noise
+                    if len(line) < 5: continue 
                     
-                    # Check relevancy
                     is_relevant = ("Question" in line) or ("Q:" in line) or (card_name.lower() in line.lower()) or ("activate" in line.lower())
                     
                     if is_relevant:
                         qa_lines.append(f"- {line}")
-                        capture_countdown = 3 # Capture next 3 lines blindly (expecting Answer)
+                        capture_countdown = 3 
                     elif capture_countdown > 0:
-                        qa_lines.append(f"  {line}") # Indent context
+                        qa_lines.append(f"  {line}")
                         capture_countdown -= 1
                 
                 browser.close()
+                logs.append(f"Extracted {len(qa_lines)} relevant lines.")
                 
                 if len(qa_lines) > 0:
-                    # Return distinct lines to avoid duplication loop
+                    # Dedup
                     seen = set()
                     final_lines = []
                     for l in qa_lines:
                         if l not in seen:
                             final_lines.append(l)
                             seen.add(l)
-                    return "\n".join(final_lines[:30]) # Limit output
-                else:
-                    return None
-                
-                browser.close()
-                
-                if len(qa_lines) > 0:
-                    return "\n".join(qa_lines)
-                else:
-                    return None
-
-        except Exception as e:
             print(f"YGO Resources Scrape Error: {e}")
             return None
 
