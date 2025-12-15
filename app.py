@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from duckduckgo_search import DDGS
+from yugioh_scraper import YuGiOhMetaScraper
 
 # Carica variabili d'ambiente da .env se presente
 load_dotenv()
@@ -82,6 +83,63 @@ def extract_cards(model, user_question):
         return []
     except Exception:
         return []
+
+def scrape_deck_list(deck_url):
+    """Estrae la lista carte da una pagina deck di YGOProDeck."""
+    try:
+        if not deck_url.startswith("http"):
+            deck_url = f"https://ygoprodeck.com{deck_url}"
+            
+        # Headers standard già definiti globalmente, o usiamone di nuovi
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        
+        response = requests.get(deck_url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            return "Errore download deck."
+            
+        soup = BeautifulSoup(response.text, 'html.parser')
+        deck_text = []
+        
+        # Cerca i container delle carte (Main, Extra, Side)
+        # YGOProDeck usa div con id="main_deck", "extra_deck", "side_deck"
+        # Le carte sono immagini con class="lazy" (o "master-duel-card") e attr "data-cardname"
+        for section_id, section_name in [("main_deck", "Main Deck"), ("extra_deck", "Extra Deck"), ("side_deck", "Side Deck")]:
+            section_div = soup.find('div', {'id': section_id})
+            if section_div:
+                cards = []
+                # Trova tutte le immagini delle carte
+                # Nota: la classe può variare, ma data-cardname è costante
+                for img in section_div.find_all('img'):
+                    name = img.get('data-cardname')
+                    src = img.get('data-src') or img.get('src') # Fallback
+                    if name:
+                        cards.append((name, src))
+                
+                if cards:
+                    # Conta le carte (es. 3x Ash Blossom)
+                    from collections import Counter
+                    # cards è una lista di tuple (name, src). Dobbiamo contare i nomi ma tenere un riferimento alla src.
+                    
+                    card_names = [c[0] for c in cards] # Solo nomi per il conteggio
+                    card_map = {c[0]: c[1] for c in cards} # Mappa Nome -> URL
+                    
+                    counts = Counter(card_names)
+                    
+                    # Ordina per numero copie decrescente
+                    card_lines = []
+                    for name, count in counts.most_common():
+                        url = card_map.get(name, "")
+                        # Salviamo nel contesto in formato: "3x Name <URL>" così l'LLM lo può parsare
+                        card_lines.append(f"{count}x {name} <{url}>")
+                    
+                    deck_text.append(f"**{section_name}**:")
+                    deck_text.append(", ".join(card_lines))
+                    
+        return "\n".join(deck_text) if deck_text else "Nessuna carta trovata."
+    except Exception as e:
+        return f"Errore scraping deck: {e}"
 
 def get_card_data(card_name):
     # Rimuovi spazi extra per sicurezza
@@ -433,130 +491,335 @@ elif mode == "📊 Meta Analyst":
         st.session_state.meta_context = ""
         st.session_state.meta_last_update = None
 
-    col_btn, col_status = st.columns([0.4, 0.6])
+    # --- SIDEBAR: Selezione Fonte ---
+    st.sidebar.header("Fonte Dati Meta")
+    meta_source = st.sidebar.radio("Seleziona Sito:", ["YGOProDeck (TCG)", "YuGiOhMeta (Sperimentale)"])
+
+    col1, col_status = st.columns([3, 1])
     
-    # Opzione Manuale (risponde alla richiesta "ti servono link?")
-    manual_url = st.text_input("🔗 Hai un link specifico? Incollalo qui (es. YGOProDeck Tournament URL):", placeholder="https://ygoprodeck.com/tournament/...")
+    with col1:
+        st.title(f"Meta Analyst: {meta_source} 📊")
+        
+        # ==========================================
+        # MODALITÀ: YGOProDeck (Principale)
+        # ==========================================
+        if meta_source == "YGOProDeck (TCG)":
+            st.markdown("### Analisi Trend, Top Cut e Decklist")
+            
+            manual_url = st.text_input("🔗 Hai un link specifico? Incollalo qui (es. YGOProDeck Tournament URL):", placeholder="https://ygoprodeck.com/tournament/...")
 
-    with col_btn:
-        if st.button("🔄 Aggiorna Database Meta (TCG)"):
-            with st.spinner("Scansiono il Web + Link Manuali..."):
-                try:
-                    # CONFIGURAZIONE
-                    HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-                    aggregated_text = f"DATA ANALISI: {datetime.now().strftime('%d %B %Y')}\n\n"
-                    
-                    urls_to_scrape = set()
-                    scan_log = []
-
-                    # 1. Aggiungi Link Manuale se presente
-                    if manual_url and "ygoprodeck.com" in manual_url:
-                        urls_to_scrape.add(manual_url)
-                        scan_log.append(f"🔗 Link Manuale Aggiunto: {manual_url}")
-
-                    # 2. Discovery Automatica (DDGS)
-                    # La pagina indice è dinamica (JS), quindi usiamo DDGS per trovare i link diretti
-                    if not manual_url: # Se l'utente non da un link, cerchiamo noi
-                        ddgs = DDGS()
-                        current_month_year = datetime.now().strftime("%B %Y")
+            if st.button("🔄 Aggiorna Database Meta (TCG)"):
+                with st.spinner("Scansiono il Web + Link Manuali..."):
+                    try:
+                        # CONFIGURAZIONE
+                        HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+                        aggregated_text = f"DATA ANALISI: {datetime.now().strftime('%d %B %Y')}\nFONTE: YGOProDeck\n\n"
                         
-                        targets = ["YCS", "WCQ", "Open", "Regional", "Championship"]
-                        search_queries = [f"site:ygoprodeck.com/tournaments/ {t} {current_month_year}" for t in targets]
-                        
-                        for kw in search_queries:
-                            results = ddgs.text(kw, max_results=2)
-                            if results:
-                                for r in results:
-                                    if "ygoprodeck.com/tournament/" in r['href']: # Filtra solo link torneo validi
-                                        urls_to_scrape.add(r['href'])
+                        urls_to_scrape = set()
+                        scan_log = []
 
-                    if not urls_to_scrape:
-                        st.warning("⚠️ Non ho trovato link automatici. Incolla un link nel campo sopra per aiutarmi!")
-                    
-                    # 3. Deep Scrape dei Link Trovati
-                    analyzed_count = 0
-                    for url in urls_to_scrape:
+                        # 1. Aggiungi Link Manuale se presente
+                        if manual_url and "ygoprodeck.com" in manual_url:
+                            urls_to_scrape.add(manual_url)
+                            scan_log.append(f"🔗 Link Manuale Aggiunto: {manual_url}")
+
+                        # 2. Discovery Automatica (Playwright)
+                        st.toast("🤖 Avvio Browser per cercare tornei recenti...")
+                        scraper_tool = YuGiOhMetaScraper() # Utilizziamo la classe per accedere al metodo Playwright
+                        
                         try:
-                            # Scarica HTML
-                            resp = requests.get(url, headers=HEADERS, timeout=10)
-                            soup = BeautifulSoup(resp.text, 'html.parser')
+                            # Usa il nuovo metodo Playwright (ultimi 60 giorni)
+                            st.write("🗓️ Scansione ultimi 2 mesi (60 giorni)...")
+                            found_links = scraper_tool.get_ygoprodeck_tournaments(days_lookback=60)
                             
-                            # Estrai Titolo
-                            page_title = soup.title.string if soup.title else url
-                            
-                            # Cerca Tabella Risultati (Struttura DIV o TABLE)
-                            results_text = ""
-                            rows_data = []
-                            
-                            # TENTATIVO 1: Struttura DIV (Nuova YGOProDeck)
-                            div_table = soup.find('div', {'id': 'tournament_table'})
-                            if div_table:
-                                # Itera sulle righe (che sono spesso link <a> o div)
-                                rows = div_table.find_all(['a', 'div'], class_='tournament_table_row')
-                                for row in rows:
-                                    cells = row.find_all('span', class_='as-tablecell')
-                                    if len(cells) >= 3:
-                                        place = cells[0].get_text(strip=True)
-                                        
-                                        # Player Name (cerca span specifico o fallback)
-                                        player_span = cells[1].find('span', class_='player-name')
-                                        player = player_span.get_text(strip=True) if player_span else cells[1].get_text(strip=True)
-                                        
-                                        # Deck Name (spesso dentro un badge o semplicemente testo)
-                                        deck_text = cells[2].get_text(separator=" ", strip=True) # Usa separator per evitare testi attaccati
-                                        
-                                        rows_data.append(f"- {place}: {player} -> {deck_text}")
-                            
-                            # TENTATIVO 2: Struttura TABLE Classica (Vecchia o alternativa)
-                            if not rows_data:
-                                tables = soup.find_all('table')
-                                for tb in tables:
-                                    if "player" in tb.get_text().lower():
-                                        for tr in tb.find_all('tr')[1:]:
-                                            cols = tr.find_all('td')
-                                            if len(cols) >= 3:
-                                                row_str = " | ".join([c.get_text(strip=True) for c in cols])
-                                                rows_data.append(f"- {row_str}")
-                                        break
-                                        
-                            # Generazione Testo Finale
-                            if rows_data:
-                                results_text = "\n".join(rows_data)
+                            if found_links:
+                                st.success(f"✅ Trovati {len(found_links)} tornei nel periodo!")
+                                for link in found_links:
+                                    if link not in urls_to_scrape:
+                                        urls_to_scrape.add(link)
+                                        scan_log.append(f"🌍 Trovato: {link}")
                             else:
-                                # Fallback estremo: testo grezzo
-                                results_text = soup.get_text(separator="\n")[:2000] 
-                            
-                            if results_text:
-                                aggregated_text += f"\n=== REPORT: {page_title} ===\nURL: {url}\n{results_text}\n{'='*30}\n"
-                                analyzed_count += 1
-                                scan_log.append(f"✅ Letto: {page_title}")
-                            
+                                st.warning("⚠️ Nessun torneo trovato tramite Playwright. Provo fallback manuale...")
+                        
                         except Exception as e:
-                            scan_log.append(f"❌ Errore {url}: {e}")
+                            st.error(f"Errore Playwright: {e}")
 
-                    # 4. Salvataggio
-                    st.session_state.meta_context = aggregated_text
-                    st.session_state.meta_last_update = datetime.now().strftime("%H:%M")
-                    
-                    if analyzed_count > 0:
-                        st.success(f"Analisi Completata! Importati {analyzed_count} report.")
-                        with st.expander("Dettagli Scansione"):
-                            for l in scan_log: st.write(l)
+                        # 3. Deep Scrape dei Link Trovati
+                        analyzed_count = 0
+                        for url in urls_to_scrape:
+                            try:
+                                # Scarica HTML
+                                resp = requests.get(url, headers=HEADERS, timeout=10)
+                                soup = BeautifulSoup(resp.text, 'html.parser')
+                                
+                                # Estrai Titolo
+                                page_title = soup.title.string if soup.title else url
+                                
+                                # Cerca Tabella Risultati (Struttura DIV o TABLE)
+                                results_text = ""
+                                rows_data = []
+                                
+                                # TENTATIVO 1: Struttura DIV (Nuova YGOProDeck)
+                                div_table = soup.find('div', {'id': 'tournament_table'})
+                                if div_table:
+                                    # Itera sulle righe (che sono spesso link <a> o div)
+                                    rows = div_table.find_all(['a', 'div'], class_='tournament_table_row')
+                                    
+                                    for i, row in enumerate(rows):
+                                        cells = row.find_all('span', class_='as-tablecell')
+                                        if len(cells) >= 3:
+                                            place = cells[0].get_text(strip=True)
+                                            
+                                            # Player Name
+                                            player_span = cells[1].find('span', class_='player-name')
+                                            player = player_span.get_text(strip=True) if player_span else cells[1].get_text(strip=True)
+                                            
+                                            # Deck Name & Variants
+                                            deck_cell = cells[2]
+                                            deck_text = deck_cell.get_text(separator=" ", strip=True)
+                                            
+                                            variants = []
+                                            for img in deck_cell.find_all('img', class_='archetype-tournament-img'):
+                                                title = img.get('title')
+                                                if title: variants.append(title)
+                                            if variants: deck_text += " + " + " + ".join(variants)
+                                            
+                                            # Link Deck
+                                            deck_link = row.get('href') if row.name == 'a' else None
+                                            if not deck_link:
+                                                link_tag = deck_cell.find('a')
+                                                if link_tag: deck_link = link_tag.get('href')
+                                            
+                                            # Deep Scrape (Top Cut)
+                                            details = ""
+                                            is_top_cut = any(x in place.lower() for x in ["winner", "1st", "2nd", "top 4", "top 8"])
+                                            
+                                            if is_top_cut and deck_link and "deck/" in deck_link:
+                                                st.toast(f"📥 Scarico lista: {player} ({deck_text})...")
+                                                # Chiama funzione scrape_deck_list (definita fuori)
+                                                deck_content = scrape_deck_list(deck_link) 
+                                                if deck_content:
+                                                    details = f"\n   [DETTAGLIO DECK]\n   {deck_content.replace(chr(10), chr(10)+'   ')}\n"
+                                            
+                                            rows_data.append(f"- {place}: {player} -> {deck_text}{details}")
+
+                                if rows_data:
+                                    results_text = "\n".join(rows_data)
+                                    aggregated_text += f"\n=== REPORT: {page_title} ===\nURL: {url}\n{results_text}\n{'='*30}\n"
+                                    analyzed_count += 1
+                                    scan_log.append(f"✅ Letto: {page_title}")
+                                
+                            except Exception as e:
+                                scan_log.append(f"❌ Errore {url}: {e}")
+
+                        # 4. Salvataggio
+                        st.session_state.meta_context = aggregated_text
+                        st.session_state.meta_last_update = datetime.now().strftime("%H:%M")
+                        
+                        if analyzed_count > 0:
+                            st.success(f"Analisi Completata! Importati {analyzed_count} report.")
+                            with st.expander("Dettagli Scansione"):
+                                for l in scan_log: st.write(l)
+                        else:
+                            st.error("Nessun dato utile estratto. Debug Info:")
+                            st.code(scan_log)
+
+                    except Exception as e:
+                        st.error(f"Errore: {e}")
+
+        # ==========================================
+        # MODALITÀ: YuGiOhMeta (Sperimentale)
+        # ==========================================
+        elif meta_source == "YuGiOhMeta (Sperimentale)":
+            st.markdown("### 🧬 YuGiOhMeta Integration")
+            
+            ym_mode = st.radio("Modalità:", ["Tier List Live (Snapshot)", "Analisi Tech Competitiva (All vs T3)", "Analisi Articoli (Roundup)"], horizontal=True)
+            
+            # --- MODE 1: TIER LIST LIVE ---
+            if ym_mode == "Tier List Live (Snapshot)":
+                st.info("📊 **Tier List Mode**: Analizza lo snapshot attuale di YuGiOhMeta (Deck Types + Techs).")
+                if st.button("📡 Scarica Dati Tier List", type="primary"):
+                    scraper_tool = YuGiOhMetaScraper()
+                    with st.status("🔍 Analizzando yugiohmeta.com...", expanded=True):
+                        st.write("🌍 Navigazione verso /tier-list...")
+                        data = scraper_tool.get_tier_list_data()
+                        if not data["decks"]:
+                            st.error("❌ Impossibile scaricare la Tier List.")
+                            st.stop()
+                        st.success("✅ Dati scaricati con successo!")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.subheader("🏆 Meta Decks")
+                            for d in data["decks"]: st.write(f"**{d['name']}**: {d['percent']} ({d['count']} tops)")
+                        with col2:
+                            st.subheader("🛠️ Main Techs")
+                            with st.expander("Vedi Techs", expanded=True):
+                                for t in data["techs"][:20]: st.write(f"- {t['name']} ({t['usage']})")
+                        with col3:
+                            st.subheader("🛡️ Side Staples")
+                            with st.expander("Vedi Side", expanded=True):
+                                for s in data["side"][:20]: st.write(f"- {s['name']} ({s['usage']})")
+                        
+                        aggregated_text = f"DATA TIER LIST: {datetime.now().strftime('%d %B %Y')}\nFONTE: YuGiOhMeta Tier List\n\n"
+                        aggregated_text += f"=== DECK BREAKDOWN ===\n{str(data['decks'])}\n\n"
+                        aggregated_text += f"=== MAIN DECK TECHS ===\n{str(data['techs'])}\n\n"
+                        aggregated_text += f"=== SIDE DECK STAPLES ===\n{str(data['side'])}\n"
+                        st.session_state.meta_context = aggregated_text
+                        st.session_state.meta_last_update = datetime.now().strftime("%H:%M")
+                        st.success("🧠 Dati inviati all'AI! Ora chiedi pure.")
+
+            # --- MODE 2: TECH DEEP DIVE (NEW) ---
+            elif ym_mode == "Analisi Tech Competitiva (All vs T3)":
+                st.info("🔬 **Tech Deep Dive**: Confronta le carte più giocate nel Meta Generale vs Tornei Competitivi (T3 Events).")
+                
+                if st.button("🔎 Avvia Analisi Comparativa", type="primary"):
+                    scraper_tool = YuGiOhMetaScraper()
+                    with st.status("🕵️‍♀️ Analisi Approfondita Techs...", expanded=True):
+                        st.write("🌍 Navigazione verso /tier-list#techs...")
+                        data = scraper_tool.get_tech_deep_dive()
+                        
+                        if not data["all"] or not data["t3"]:
+                            st.error("❌ Impossibile recuperare i dati comparativi.")
+                            st.stop()
+                            
+                        st.success("✅ Dati Estratti: Events All vs T3 Only")
+                        
+                        # Show Comparison
+                        st.subheader("⚔️ Confronto Utilizzo (Top 20)")
+                        
+                        # Prepare data for display
+                        # Create a map for T3 stats
+                        t3_map = {c["name"]: c for c in data["t3"]}
+                        
+                        for item in data["all"][:20]:
+                            name = item["name"]
+                            all_pct = item.get("percent", "N/A")
+                            t3_item = t3_map.get(name)
+                            t3_pct = t3_item.get("percent", "N/A") if t3_item else "N/A"
+                            
+                            # Visual Diff
+                            diff_str = ""
+                            try:
+                                v1 = float(all_pct.replace('%',''))
+                                v2 = float(t3_pct.replace('%',''))
+                                diff = v2 - v1
+                                if diff > 0: diff_str = f"📈 +{diff:.1f}% in T3"
+                                elif diff < 0: diff_str = f"📉 {diff:.1f}% in T3"
+                                else: diff_str = "="
+                            except:
+                                pass
+                                
+                            st.markdown(f"**{name}**: All ({all_pct}) vs T3 ({t3_pct}) | {diff_str}")
+                            
+                        # AI Context
+                        aggregated_text = f"DATA TECH ANALYSIS: {datetime.now().strftime('%d %B %Y')}\nMODE: Tech Deep Dive (All vs T3)\n\n"
+                        aggregated_text += f"=== ALL EVENTS TECHS ===\n{str(data['all'])}\n\n"
+                        aggregated_text += f"=== T3 (COMPETITIVE) TECHS ===\n{str(data['t3'])}\n"
+                        
+                        st.session_state.meta_context = aggregated_text
+                        st.session_state.meta_last_update = datetime.now().strftime("%H:%M")
+                        st.success("🧠 Report Comparativo pronto per l'AI!")
+
+            # --- MODE 3: MANUAL / ROUNDUP ---
+            else:
+                st.info("ℹ️ Per analizzare un torneo, incolla il link di UN MAZZO qualsiasi di quel torneo (es. 'Top Decks' -> click su un mazzo -> copia URL).")
+                
+                ym_urls = st.text_area("🔗 Incolla Link Mazzo/i (YuGiOhMeta):", placeholder="https://www.yugiohmeta.com/top-decks/...\nhttps://www.yugiohmeta.com/top-decks/...", height=100)
+                
+                if st.button("🚀 Estrai Dati Torneo"):
+                    if not ym_urls:
+                        st.warning("Incolla almeno un link!")
                     else:
-                        st.error("Nessun dato utile estratto. Prova a incollare un link diverso.")
+                        scraper = YuGiOhMetaScraper()
+                        # Split by newlines/commas and clean
+                        raw_urls = [u.strip() for u in ym_urls.replace(",", "\n").split("\n") if u.strip()]
+                        url_list = []
+                        
+                        # Check for Roundup URLs (Articles) and Auto-Expand
+                        with st.status("🔍 Analisi Link...", expanded=True) as status:
+                            for u in raw_urls:
+                                if "/articles/tournaments/" in u:
+                                    st.info(f"📄 Rilevata Pagina Roundup: {u}")
+                                    st.write("🤖 Avvio Browser per estrarre i link dei mazzi...")
+                                    try:
+                                        extracted_links = scraper.get_links_from_roundup(u)
+                                        if extracted_links:
+                                            st.success(f"✅ Estratti {len(extracted_links)} link dalla pagina!")
+                                            url_list.extend(extracted_links)
+                                        else:
+                                            st.error("⚠️ Nessun link trovato nella pagina roundup.")
+                                    except Exception as e:
+                                        st.error(f"Errore Playwright: {e}")
+                                else:
+                                    url_list.append(u)
+                            
+                            if not url_list:
+                                 st.warning("Nessun link valido trovato.")
+                            else:
+                                status.update(label=f"Analisi di {len(url_list)} link...", state="running")
+                                all_decks_data = []
+                                scraped_events = set()
+                                
+                                progress_bar = st.progress(0)
+                                
+                                for idx, url in enumerate(url_list):
+                                    st.write(f"🔍 Analisi Link {idx+1}/{len(url_list)}...")
+                                    event_id, event_name = scraper.get_event_id_from_deck_url(url)
+                                    
+                                    if event_id:
+                                        if event_id in scraped_events:
+                                            st.warning(f"⚠️ Evento già processato: {event_name}")
+                                        else:
+                                            st.success(f"✅ Torneo Identificato: **{event_name}**")
+                                            decks = scraper.get_tournament_decks(event_id)
+                                            if decks:
+                                                # Add event name to each deck for context
+                                                for d in decks: d["_eventName"] = event_name
+                                                all_decks_data.extend(decks)
+                                                scraped_events.add(event_id)
+                                    else:
+                                        st.error(f"❌ Impossibile risolvere link: {url}")
+                                    
+                                    progress_bar.progress((idx + 1) / len(url_list))
+                                
+                                if all_decks_data:
+                                    total_decks = len(all_decks_data)
+                                    st.success(f"📦 Totale Mazzi Trovati: {total_decks}")
+                                    
+                                    start_time = time.time()
+                                    aggregated_text = f"DATA ANALISI: {datetime.now().strftime('%d %B %Y')}\nFONTE: YuGiOhMeta\nEVENTI: {', '.join(scraped_events)}\n"
+                                    
+                                    # Analyze Coverage (Global)
+                                    coverage_report = scraper.analyze_coverage(all_decks_data)
+                                    aggregated_text += f"COVERAGE GLOBALE: {coverage_report}\n\n"
+                                    st.info(coverage_report)
 
-                except Exception as e:
-                    st.error(f"Errore: {e}")
+                                    # Processing Decks
+                                    for i, deck in enumerate(all_decks_data):
+                                        ename = deck.get("_eventName", "Unknown Event")
+                                        parsed_deck = scraper.parse_deck_list(deck)
+                                        # Add Event Name to the deck summary
+                                        parsed_deck = f"Event: {ename}\n" + parsed_deck
+                                        aggregated_text += f"=== DECK {i+1} ===\n{parsed_deck}\n{'='*30}\n"
+                                    
+                                    st.session_state.meta_context = aggregated_text
+                                    st.session_state.meta_last_update = datetime.now().strftime("%H:%M")
+                                    status.update(label="Scraping Multiplo Completato!", state="complete", expanded=False)
+                                    st.success("✅ Database Meta Aggiornato con successo!")
+                                else:
+                                    st.error("❌ Nessun dato valido estratto dai link forniti.")
 
+    # --- STATUS BAR COMUNE ---
     with col_status:
         if st.session_state.meta_last_update:
             st.caption(f"Ultimo aggiornamento: {st.session_state.meta_last_update}")
         else:
-            st.warning("⚠️ Database vuoto. Clicca 'Aggiorna' per scaricare i dati TCG.")
+            st.warning("⚠️ Database vuoto.")
 
     st.divider()
 
-    # --- FASE 2: Chatbot (RAG) ---
+    # --- FASE 2: Chatbot (RAG) - COMUNE ---
     meta_query = st.text_area("Domanda sul Meta TCG:", placeholder="Es: 'Quali sono i Tier 1 attuali?' o 'Lista per Tenpai Dragon?'", height=100)
     
     if st.button("Analizza Meta 🧠"):
@@ -568,27 +831,118 @@ elif mode == "📊 Meta Analyst":
             # Uso modello standard (niente tools, niente errori)
             meta_model, _ = resolve_working_model()
             
+            # CSS STYLE INJECTION FOR TOOLTIPS (Must run in Streamlit)
+            st.markdown("""
+            <style>
+            /* Tooltip Container */
+            .ygo-card-wrapper {
+                position: relative;
+                display: inline-block;
+                margin: 4px;
+                cursor: pointer;
+            }
+            .ygo-card-wrapper:hover .ygo-tooltip {
+                visibility: visible;
+                opacity: 1;
+            }
+            /* Tooltip Box */
+            .ygo-tooltip {
+                visibility: hidden;
+                width: 250px;
+                background-color: #1e1e1e;
+                color: #fff;
+                text-align: left;
+                border: 1px solid #444;
+                border-radius: 8px;
+                padding: 10px;
+                position: absolute;
+                z-index: 1000;
+                bottom: 120%; /* Show above */
+                left: 50%;
+                margin-left: -125px;
+                opacity: 0;
+                transition: opacity 0.2s;
+                box-shadow: 0px 4px 15px rgba(0,0,0,0.5);
+                font-size: 12px;
+                pointer-events: none; /* Let clicks pass through if needed, though mostly visual */
+            }
+            .ygo-tooltip img {
+                width: 100%;
+                border-radius: 4px;
+                margin-bottom: 8px;
+            }
+            .ygo-tooltip h4 {
+                margin: 0 0 5px 0;
+                font-size: 14px;
+                color: #ffcc00;
+            }
+            .ygo-tooltip p {
+                margin: 0 0 5px 0;
+                line-height: 1.3;
+            }
+            .ygo-badge {
+                position: absolute;
+                bottom: 0;
+                right: 0;
+                background-color: rgba(0,0,0,0.85);
+                color: #00ffcc;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 2px 4px;
+                border-radius: 4px 0 4px 0;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+
+            # RAG PROMPT DEFINITION
             prompt_rag = f"""
-            Sei un esperto di Yu-Gi-Oh! TCG (Trading Card Game).
+            Sei un esperto di Yu-Gi-Oh! TCG.
             
             DOMANDA UTENTE: "{meta_query}"
+            FONTE DI VERITÀ: {st.session_state.meta_context}
             
-            FONTE DI VERITÀ (Report Scaricato dal Web):
-            ---
-            {st.session_state.meta_context}
-            ---
+            ISTRUZIONI COMPORTAMENTALI:
+            1. **INTENTO**: Rispondi SOLO alla domanda se specifica. Genera Report Completo solo se richiesto genericamente.
             
-            ISTRUZIONI RIGOROSE:
-            1. Ignora qualsiasi riferimento a carte esclusive OCG o alla banlist di Master Duel (es. Maxx "C" è bannato nel TCG).
-            2. Usa ESCLUSIVAMENTE le informazioni nel 'Report Meta' qui sopra.
-            3. Quando elenchi i mazzi, dai priorità ai dati che provengono da 'ygoprodeck.com' o report di 'YCS/Regional'.
-            4. Se trovi decklist testuali nei risultati, riassumi le carte chiave (Engine, Tech Cards, Staples).
-            5. Se nel report non c'è la risposta, dillo onestamente.
+            2. **FORMATTAZIONE DECKLIST (IMPORTANTE)**:
+               - **ORDINAMENTO**:
+                 - **Main Deck**: ORDINA RIGOROSAMENTE: **Mostri** ➡️ **Magie** ➡️ **Trappole**.
+                 - **Extra Deck**: Fusion/Synchro/Xyz/Link.
+                 - **Side Deck**: Ordinato (Mostri/Magie/Trap) MA visualizzato in un **UNICO CONTAINER** (non spezzare le righe tra le categorie).
+                 
+               - **STRUTTURA HTML**: Per OGNI carta, genera questo blocco HTML (non usare markdown o tabelle):
+                 ```html
+                 <div class="ygo-card-wrapper">
+                    <img src="URL_IMMAGINE" width="60" style="border-radius: 4px;">
+                    <div class="ygo-badge">3x</div>
+                    <div class="ygo-tooltip">
+                        <img src="URL_IMMAGINE"> <!-- Immagine Grande -->
+                        <h4>NOME CARTA</h4>
+                        <p><b>Tipo/Attributo</b>: [Es. Dragon/Dark/Level 8]</p>
+                        <p><b>Effetto</b>: [Scrivi qui l'effetto breve o riassunto...]</p>
+                    </div>
+                 </div>
+                 ```
+               - **REGOLE**:
+                 - Sostituisci `3x` con la quantità corretta.
+                 - Sostituisci `URL_IMMAGINE` e `NOME CARTA`.
+                 - INVENTA/RECUPERA i Dati (Tipo, Attributo, Effetto) basandoti sulla tua conoscenza della carta.
+                 - Raggruppa i blocchi in un `div` flexbox: `<div style="display: flex; flex-wrap: wrap;">...</div>`.
+                 
+               - Usa SEMPRE: `<details><summary>📜 Decklist: [Piazzamento] [Nome] ([Mazzo])</summary> <h3>Main Deck</h3> [Flex Div Mostri+Magie+Trap] ... </details>`
+
+            3. **FORMATTAZIONE REPORT (Solo se richiesto genericamente)**:
+               - **Metagame Breakdown**: % Mazzi.
+               - **Top Techs**: Carte più giocate.
+            
+            4. **REGOLE DATA**:
+               - Ignora OCG/Master Duel list.
+               - Usa solo i dati forniti sopra.
             """
             
             with st.spinner("Analizzando i report TCG..."):
                 try:
                     response = meta_model.generate_content(prompt_rag)
-                    st.markdown(response.text)
+                    st.markdown(response.text, unsafe_allow_html=True)
                 except Exception as e:
                     st.error(f"Errore generazione: {e}")
