@@ -95,19 +95,27 @@ def analyze_image_for_cards(model, image):
     COMPITO:
     Analizza questa foto del tavolo da gioco. Identifica le carte visibili.
     
-    STRATEGIA MIGLIORE (OCR):
-    1. PROVA A LEGGERE IL NOME stampato sulla carta (in alto). È la fonte più affidabile.
-    2. Se il nome è sfocato, guarda l'artwork e il colore del bordo (Nero=Xyz, Blu=Link, etc).
-    3. Combina lettura parziale ("Sky Crisis") + artwork per dedurre "Super Starslayer TY-PHON - Sky Crisis".
+    ATTENZIONE - ROTAZIONE:
+    - Molte carte sono in "Posizione di Difesa" (ruotate di 90°) o capovolte.
+    - RUOTA MENTALMENTE l'immagine per leggere il testo scritto in alto.
+    - NON farti ingannare dall'orientamento.
+    
+    STRATEGIA (OCR + COLORI):
+    1. Leggi il nome.
+    2. Controlla il colore del bordo:
+       - BLU con Esagoni = LINK. (Es: "Backup @Ignister"). Se leggi "Backup Supervisor" ma è BLU, allora è "@Ignister"!
+       - NERO = XYZ.
+       - VIOLA = FUSIONE.
+       - VERDE = MAGIA.
     
     ISTRUZIONI:
     - Restituisci SOLO i nomi ufficiali inglesi.
-    - Se leggi "Ripper" e vedi un mostro XYZ, deduci il nome completo se lo sai, altrimenti scrivi solo ciò che leggi.
-    - NON INVENTARE NOMI che non esistono.
+    - Se leggi "Ripper" e vedi un mostro XYZ, deduci "K9-17 'Ripper'".
+    - NON INVENTARE NOMI.
     
     Output richiesto:
     Lista JSON di stringhe.
-    Esempio: ["Super Starslayer TY-PHON - Sky Crisis", "Linguriboh", "K9-17 Ripper"]
+    Esempio: ["Super Starslayer TY-PHON - Sky Crisis", "Linguriboh", "K9-17 'Ripper'", "A Case for the S.P.Y.R.A.L.s"]
     """
     
     try:
