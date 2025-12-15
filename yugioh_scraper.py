@@ -772,8 +772,14 @@ class YuGiOhMetaScraper:
                         if l not in seen:
                             final_lines.append(l)
                             seen.add(l)
-            print(f"YGO Resources Scrape Error: {e}")
-            return None
+                    return "\n".join(final_lines[:30]), "\n".join(logs)
+                else:
+                    logs.append("No relevant lines found in body.")
+                    return None, "\n".join(logs)
+
+        except Exception as e:
+            logs.append(f"Critical Error: {e}")
+            return None, "\n".join(logs)
 
 # Usage Example (for integration)
 # scraper = YuGiOhMetaScraper()
