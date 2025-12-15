@@ -307,6 +307,10 @@ if mode == "👨‍⚖️ AI Judge":
         st.session_state.question_text = ""
     if "manual_added_cards" not in st.session_state:
         st.session_state.manual_added_cards = []
+    
+    # Initialize Watchdog for Chat
+    if "judge_chat_history" not in st.session_state:
+        st.session_state.judge_chat_history = []
 
     # Funzione per reset Judge
     def reset_judge():
@@ -524,11 +528,11 @@ if mode == "👨‍⚖️ AI Judge":
         with st.expander("🧐 Spiegazione Tecnica Approfondita"):
             st.markdown(deep_dive.strip())
 
-            # --- EXPERIMENTAL: YGO RESOURCES SEARCH ---
-            st.markdown("---")
-            col_sc, col_new = st.columns([2, 1])
-            with col_sc:
-                if st.button("🔍 Consulta YGO Resources (OCG Rulings)"):
+        # --- EXPERIMENTAL: YGO RESOURCES SEARCH ---
+        st.markdown("---")
+        col_sc, col_new = st.columns([2, 1])
+        with col_sc:
+            if st.button("🔍 Consulta YGO Resources (OCG Rulings)"):
                     
                     # 1. Recupera carte identificate (dalla cache persistente)
                     cards_to_check = st.session_state.get("found_cards_cache", [])
