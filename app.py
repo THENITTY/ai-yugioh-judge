@@ -90,16 +90,20 @@ def extract_cards(model, user_question):
 def analyze_image_for_cards(model, image):
     """Analizza un'immagine con Gemini Vision per trovare carte."""
     prompt = """
-    Sei un esperto di Yu-Gi-Oh!.
+    Sei un giocatore esperto di Yu-Gi-Oh!.
     
     COMPITO:
-    Analizza questa immagine. Identifica TUTTE le carte di Yu-Gi-Oh! visibili (Mostri, Magie, Trappole).
+    Analizza questa foto del tavolo da gioco. Identifica le carte visibili.
+    
+    ISTRUZIONI CRITICHE:
+    1. Restituisci SOLO i nomi delle carte di cui sei SICURO al 100%.
+    2. Usa il colore del bordo per capire il tipo (Blu=Link, Nero=Xyz, Bianco=Synchro, Viola=Fusione).
+    3. Se vedi solo un pezzo di nome, cerca di dedurre la carta più famosa e probabile del meta attuale.
+    4. NON INVENTARE NOMI. Se non la riconosci, ignorala.
     
     Output richiesto:
-    Restituisci SOLO una lista JSON di stringhe con i nomi ufficiali inglesi delle carte che riesci a identificare.
-    Esempio: ["Baronne de Fleur", "Mirrorjade the Iceblade Dragon"]
-    
-    Se non sei sicuro di una carta, descrivila o prova a indovinare dal colore/artwork, ma cerca di fornire il nome più probabile.
+    Lista JSON di stringhe coi nomi esatti in inglese.
+    Esempio: ["Linguriboh", "Backup Secretary", "Number 41: Bagooska"]
     """
     
     try:
