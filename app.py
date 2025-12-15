@@ -432,8 +432,6 @@ if mode == "👨‍⚖️ AI Judge":
         
         with st.spinner("Generazione verdetto in corso..."):
             
-        with st.spinner("Generazione verdetto in corso..."):
-            
             # STRATEGIA DI PROMPT
             prompt_ruling = f"""
             Sei un **HEAD JUDGE UFFICIALE DI YU-GI-OH** (Livello 3).
