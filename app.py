@@ -432,27 +432,9 @@ if mode == "👨‍⚖️ AI Judge":
         
         with st.spinner("Generazione verdetto in corso..."):
             
-            # MODEL SELECTION
-            judge_model = None
-            if use_smart_judge:
-                # Try Smart Model with Search Tools
-                try:
-                    tools_config = 'google_search_retrieval' # Shorthand for grounding
-                    # Prefer Pro for reasoning
-                    judge_model = genai.GenerativeModel('gemini-1.5-pro', tools=tools_config)
-                    st.toast("🧠 Uso Gemini 1.5 Pro + Google Search")
-                except:
-                    try:
-                        # Fallback to Flash + Search
-                        judge_model = genai.GenerativeModel('gemini-1.5-flash', tools=tools_config)
-                        st.toast("⚡ Uso Gemini 1.5 Flash + Google Search")
-                    except:
-                        # Fallback to standard
-                        judge_model, _ = resolve_working_model()
-                        st.warning("⚠️ Search Tools non disponibili. Uso modello base.")
-            else:
-                 judge_model, _ = resolve_working_model()
-
+        with st.spinner("Generazione verdetto in corso..."):
+            
+            # STRATEGIA DI PROMPT
             prompt_ruling = f"""
             Sei un **HEAD JUDGE UFFICIALE DI YU-GI-OH** (Livello 3).
             Il tuo compito è emettere ruling tecnici estremamente precisi.
@@ -489,14 +471,42 @@ if mode == "👨‍⚖️ AI Judge":
             - Analisi tecnica step-by-step.
             - Citazione Rulings (se trovate).
             """
+
+            # ROBUST GENERATION LOOP
+            # Tenta Pro -> Flash (Smart) -> Flash (Standard)
+            strategies = []
+            if use_smart_judge:
+                strategies.append(("gemini-1.5-pro", 'google_search_retrieval'))
+                strategies.append(("gemini-1.5-flash", 'google_search_retrieval'))
             
-            # Call generation directly to support tools if present
-            try:
-                response_obj = judge_model.generate_content(prompt_ruling)
-                response_text = response_obj.text
-            except Exception as e:
-                st.error(f"Errore generazione Judge: {e}")
-                response_text = "Errore durante la generazione del verdetto."
+            # Always have a safe fallback
+            strategies.append(("gemini-1.5-flash", None))
+            
+            response_text = ""
+            success = False
+            last_error = None
+
+            for model_name, tools_conf in strategies:
+                try:
+                    # Configura Modello
+                    if tools_conf:
+                        model = genai.GenerativeModel(model_name, tools=tools_conf)
+                    else:
+                        model = genai.GenerativeModel(model_name) # No tools
+                    
+                    # Tenta Generazione
+                    response_obj = model.generate_content(prompt_ruling)
+                    response_text = response_obj.text
+                    success = True
+                    st.toast(f"✅ Generato con {model_name} {'(Search)' if tools_conf else ''}")
+                    break # Success!
+                except Exception as e:
+                    last_error = e
+                    continue # Try next strategy
+            
+            if not success:
+                st.error(f"Errore Critico Generazione: {last_error}")
+                response_text = "Errore: Impossibile generare verdetto con nessun modello."
             
             if "---DETTAGLI---" in response_text:
                 short_answer, deep_dive = response_text.split("---DETTAGLI---")
