@@ -111,11 +111,12 @@ def analyze_image_for_cards(model, image):
     ISTRUZIONI:
     - Restituisci SOLO i nomi ufficiali inglesi.
     - Se leggi "Ripper" e vedi un mostro XYZ, deduci "K9-17 'Ripper'".
+    - Fai attenzione alle VIRGOLETTE nel nome (es: "A Case for K9" potrebbe averle).
     - NON INVENTARE NOMI.
     
     Output richiesto:
     Lista JSON di stringhe.
-    Esempio: ["Super Starslayer TY-PHON - Sky Crisis", "Linguriboh", "K9-17 'Ripper'", "A Case for the S.P.Y.R.A.L.s"]
+    Esempio: ["Super Starslayer TY-PHON - Sky Crisis", "Linguriboh", "K9-17 'Ripper'", "\"A Case for K9\""]
     """
     
     try:
