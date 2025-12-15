@@ -115,8 +115,15 @@ def analyze_image_for_cards(model, image):
     - NON INVENTARE NOMI.
     
     Output richiesto:
-    Lista JSON di stringhe.
-    Esempio: ["Super Starslayer TY-PHON - Sky Crisis", "Linguriboh", "K9-17 'Ripper'", "\"A Case for K9\""]
+    Un oggetto JSON con due chiavi:
+    1. "cards": Lista di stringhe coi nomi esatti.
+    2. "situation": Una descrizione breve (in Italiano) di chi controlla cosa, la posizione (Attacco/Difesa) e la zona, basandoti sulla prospettiva (Chi fotografa è il Giocatore di Turno/Bottom side).
+    
+    Esempio:
+    {
+      "cards": ["Super Starslayer TY-PHON - Sky Crisis", "Linguriboh"],
+      "situation": "Il giocatore controlla Linguriboh nella zona Main Monster. L'avversario ha TY-PHON in attacco."
+    }
     """
     
     try:
@@ -126,17 +133,17 @@ def analyze_image_for_cards(model, image):
         # Cleanup Markdown
         cleaned_text = response_text.replace("```json", "").replace("```", "").strip()
         
-        start = cleaned_text.find('[')
-        end = cleaned_text.rfind(']') + 1
+        start = cleaned_text.find('{')
+        end = cleaned_text.rfind('}') + 1
         if start != -1 and end != -1:
             json_str = cleaned_text[start:end]
             return json.loads(json_str)
         
         # Return raw text if parsing fails (for debugging)
-        return [{"error": "parsing_failed", "raw": response_text}]
+        return {"error": "parsing_failed", "raw": response_text}
     except Exception as e:
         st.error(f"Errore Vision: {e}")
-        return []
+        return {}
         st.error(f"Errore Vision: {e}")
         return []
 
@@ -440,18 +447,26 @@ if mode == "👨‍⚖️ AI Judge":
                              # 1. Vision Analysis
                              vision_cards = []
                              vision_model, _name = resolve_working_model()
-                             vision_response = analyze_image_for_cards(vision_model, image)
+                             vision_data = analyze_image_for_cards(vision_model, image)
+                             
+                             vision_cards = []
+                             situation_desc = ""
                              
                              # Check for errors/raw text first
-                             if vision_response and isinstance(vision_response[0], dict) and "error" in vision_response[0]:
-                                 st.warning("⚠️ L'AI ha risposto ma non sono riuscito a leggere la lista carte.")
-                                 vision_cards = []
-                             else:
-                                 # --- FUZZY MATCHING CORRECTION ---
-                                 import difflib
-                                 vision_cards_corrected = []
-                                 
-                                 for raw_name in vision_response:
+                             if isinstance(vision_data, dict):
+                                 if "error" in vision_data:
+                                     st.warning("⚠️ Errore lettura AI.")
+                                     # with st.expander("Raw"): st.write(vision_data["raw"])
+                                 else:
+                                     vision_cards = vision_data.get("cards", [])
+                                     situation_desc = vision_data.get("situation", "")
+                             
+                             # --- FUZZY MATCHING CORRECTION ---
+                             import difflib
+                             vision_cards_corrected = []
+                             
+                             if vision_cards:
+                                 for raw_name in vision_cards:
                                      # Try exact match first
                                      if raw_name in all_card_names:
                                          vision_cards_corrected.append(raw_name)
@@ -462,20 +477,23 @@ if mode == "👨‍⚖️ AI Judge":
                                              st.toast(f"Corretto: {raw_name} -> {matches[0]}")
                                              vision_cards_corrected.append(matches[0])
                                          else:
-                                             # Keep raw if no match found (user can fix manually)
                                              vision_cards_corrected.append(raw_name)
-                                 
                                  vision_cards = vision_cards_corrected
-                             
-                             if vision_cards:
-                                 st.toast(f"Trovate {len(vision_cards)} carte dalla foto!")
+                                 st.toast(f"Trovate {len(vision_cards)} carte!")
                              else:
-                                 st.warning("Non ho trovato carte sicure nella foto.")
+                                 st.warning("Nessuna carta identificata con certezza.")
                                  
                              # 2. Merge everything
                              total_cards = list(set(manual_selection + vision_cards))
                              
-                             st.session_state.question_text = question_input
+                             # Pre-fill specific situation if found
+                             final_question = question_input
+                             if situation_desc:
+                                 st.info(f"📝 Situazione rilevata: {situation_desc}")
+                                 # Append to description if not already there
+                                 final_question = f"{question_input}\n\n[CONTESTO VISIVO RILEVATO DALL'AI]: {situation_desc}"
+                             
+                             st.session_state.question_text = final_question
                              st.session_state.detected_cards = total_cards
                              st.session_state.step = 2
                              st.rerun()
