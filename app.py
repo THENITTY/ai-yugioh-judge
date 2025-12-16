@@ -607,6 +607,7 @@ if mode == "👨‍⚖️ AI Judge":
                 - **Evocazioni Inerenti (Non-Activated)**: Se il testo di evocazione NON ha né : né ; (es: "You can Special Summon this card (from your hand)"), allora NON è un effetto che si attiva. NON LASCIA SPAZIO A CHAIN LINK. È un'azione di gioco, non un effetto attivato.
                 - **Damage Step**: Sii ESTREMAMENTE severo. Solo carte che modificano direttamente ATK/DEF, Counter Traps, o effetti che negano specificamente *l'attivazione* (non l'effetto) possono essere attivate qui.
                 - **Condizioni di Gioco (Game State)**: Verifica sempre se l'azione è permessa dallo stato attuale del gioco.
+                - **Statistiche & Floodgate**: PRIMA di giudicare, calcola l'ATK/DEF attuale considerando Magie/Trappole continue in campo (es: carte che aumentano ATK). Controlla se esistono Floodgate attivi (es: "Super Starslayer TY-PHON - Sky Crisis", "Bagooska") che inibiscono l'attivazione in base a queste stats *modificate*.
          
                  TESTI UFFICIALI (Fonte di Verità):
                  ---
