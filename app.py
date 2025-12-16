@@ -908,7 +908,6 @@ elif mode == "📊 Meta Analyst":
     col1, col_status = st.columns([3, 1])
     
     with col1:
-    with col1:
         # Title is already at the top, just show the specific source info
         st.subheader(f"Fonte: {meta_source}")
         
