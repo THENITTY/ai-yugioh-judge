@@ -332,7 +332,8 @@ except Exception as e:
 
 # --- Navigazione Modalità ---
 st.sidebar.markdown("---")
-mode = st.sidebar.selectbox("Modalità di Utilizzo:", ["👨‍⚖️ AI Judge", "📊 Meta Analyst"])
+st.sidebar.subheader("📱 Modalità")
+mode = st.sidebar.radio("Seleziona App:", ["👨‍⚖️ AI Judge", "📊 Meta Analyst"], label_visibility="collapsed")
 
 # --- UI Principale ---
 if mode == "👨‍⚖️ AI Judge":
@@ -907,13 +908,15 @@ elif mode == "📊 Meta Analyst":
     col1, col_status = st.columns([3, 1])
     
     with col1:
-        st.title(f"Meta Analyst: {meta_source} 📊")
+    with col1:
+        # Title is already at the top, just show the specific source info
+        st.subheader(f"Fonte: {meta_source}")
         
         # ==========================================
         # MODALITÀ: YGOProDeck (Principale)
         # ==========================================
         if meta_source == "YGOProDeck (TCG)":
-            st.markdown("### Analisi Trend, Top Cut e Decklist")
+            # st.markdown("### Analisi Trend, Top Cut e Decklist") # Removed redundant subheader
             
             if st.button("🔄 Aggiorna Database Meta (TCG)"):
                 with st.spinner("Scansiono il Web (Tornei Recenti)..."):
@@ -1243,7 +1246,8 @@ elif mode == "📊 Meta Analyst":
     st.divider()
 
     # --- FASE 2: Chatbot (RAG) - COMUNE ---
-    st.markdown("### 💬 Chiedi al Giudice (Chat)")
+    # --- FASE 2: Chatbot (RAG) - COMUNE ---
+    st.markdown("### 🧠 Analisi Strategica & Consigli")
     
     # CSS STYLE INJECTION FOR TOOLTIPS (Inject ONCE)
     st.markdown("""
