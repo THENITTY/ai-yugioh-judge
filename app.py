@@ -556,32 +556,32 @@ if mode == "👨‍⚖️ AI Judge":
         final_cards_list = []
         
         for i, card in enumerate(st.session_state.detected_cards):
-            col_img, col_input = st.columns([0.2, 0.8])
+            col_img, col_input = st.columns([0.15, 0.85])
             preview_data = get_card_data(card)
             with col_img:
                 if preview_data and "card_images" in preview_data:
-                    st.image(preview_data["card_images"][0]["image_url_small"], width=80)
+                    st.image(preview_data["card_images"][0]["image_url_small"], use_container_width=True)
                 else:
-                    st.write("🖼️ N/A")
+                    st.write("🖼️")
             with col_input:
                new_name = st.text_input(f"Carta #{i+1}", value=card, key=f"card_{i}", label_visibility="collapsed")
                if new_name.strip():
                    final_cards_list.append(new_name)
 
-        col_add1, col_add2 = st.columns([0.85, 0.15])
-        with col_add1:
-            extra_add = st.multiselect("Aggiungi altre carte:", options=all_card_names, key="step2_multiselect")
+        # Full width for multiselect (Cleaner)
+        extra_add = st.multiselect("Aggiungi altre carte:", options=all_card_names, key="step2_multiselect")
         
         st.divider()
         
-        col_b1, col_b2 = st.columns(2)
-        with col_b1:
-            if st.button("🔙 Modifica Domanda"):
+        # Balanced Buttons
+        col_back, col_confirm = st.columns([1, 1])
+        with col_back:
+            if st.button("🔙 Modifica Domanda", use_container_width=True):
                 st.session_state.step = 1
                 st.rerun()
                 
-        with col_b2:
-            if st.button("Conferma e Giudica 👨‍⚖️", type="primary"):
+        with col_confirm:
+            if st.button("Conferma e Giudica 👨‍⚖️", type="primary", use_container_width=True):
                 full_list = final_cards_list + extra_add
                 clean_list = list(set([c.strip() for c in full_list if c.strip()]))
                 st.session_state.detected_cards = clean_list
@@ -624,7 +624,6 @@ if mode == "👨‍⚖️ AI Judge":
         # PERSIST DATA FOR BUTTONS
         st.session_state.found_cards_cache = found_cards_data      
 
-        # 4. Generazione Verdetto (CACHE o NUOVO)
         # 4. Generazione Verdetto (CACHE o NUOVO)
         # MOVED OUTSIDE FOR SCOPE SAFETY
         judge_model, model_name = resolve_working_model()
@@ -712,233 +711,191 @@ if mode == "👨‍⚖️ AI Judge":
         with st.expander("🧐 Spiegazione Tecnica Approfondita"):
             st.markdown(deep_dive.strip())
 
-        # --- EXPERIMENTAL: YGO RESOURCES SEARCH ---
-        st.markdown("---")
-        col_sc, col_new = st.columns([2, 1])
-        with col_sc:
-            if st.button("🔍 Consulta YGO Resources (OCG Rulings)"):
+        # --- CHAT CONTESTUALE ---
+        st.divider()
+        st.markdown("### 💬 Chiedi chiarimenti")
+        
+        # Display Chat History
+        for msg in st.session_state.judge_chat_history:
+            role = "user" if msg["role"] == "user" else "assistant"
+            with st.chat_message(role):
+                st.markdown(msg["content"])
+
+        # Input
+        if detail_prompt := st.chat_input("Dubbi? Chiedi al Judge (ricorda il contesto)..."):
+            # Aggiungi a history e visualizza subito
+            st.session_state.judge_chat_history.append({"role": "user", "content": detail_prompt})
+            with st.chat_message("user"):
+                st.markdown(detail_prompt)
+            
+            # Genera risposta
+            with st.chat_message("assistant"):
+                with st.spinner("Consultando il regolamento..."):
+                    context_full = f"""
+                    CONTESTO CARTE:
+                    {cards_context}
                     
-                    # 1. Recupera carte identificate (dalla cache persistente)
+                    VERDETTO PRECEDENTE:
+                    {short_answer}
+                    {deep_dive}
+                    
+                    DOMANDA UTENTE:
+                    {detail_prompt}
+                    """
+                    followup_resp = get_gemini_response(judge_model, context_full)
+                    st.markdown(followup_resp)
+                    st.session_state.judge_chat_history.append({"role": "assistant", "content": followup_resp})
+
+        # --- ACTIONS FOOTER ---
+        st.divider()
+        col_res, col_new = st.columns([1, 1])
+        
+        with col_res:
+            if st.button("🔍 Consulta YGO Resources (OCG)", use_container_width=True):
+                    # Logic for YGO Resources
                     cards_to_check = st.session_state.get("found_cards_cache", [])
-                    
-                    # Fallback se la cache è vuota
                     if not cards_to_check and st.session_state.question_text:
-                        # Fallback rischioso: usa parole chiave dalla domanda se breve
                         if len(st.session_state.question_text) < 40:
                              cards_to_check = [{"name": st.session_state.question_text}]
                     
                     if cards_to_check:
-                         # 2. Setup Scraper con Reload
-                         try:
-                             import importlib
-                             import yugioh_scraper
-                             importlib.reload(yugioh_scraper)
-                             from yugioh_scraper import YuGiOhMetaScraper
-                             scraper = YuGiOhMetaScraper()
-                         except Exception as e:
-                             st.error(f"Errore caricamento modulo: {e}")
-                             scraper = None
+                         with st.spinner("Cercando rulings OCG..."):
+                             try:
+                                 import importlib
+                                 import yugioh_scraper
+                                 importlib.reload(yugioh_scraper)
+                                 from yugioh_scraper import YuGiOhMetaScraper
+                                 scraper = YuGiOhMetaScraper()
+                                 # (Simple execution logic for now, results shown in status or toast)
+                                 # (Simple execution logic for now, results shown in status or toast)
+                                 # st.info("Ricerca avviata nei log (funzionalità sperimentale)...")
+                                 
+                                 # Initialize these for the loop
+                                 found_rulings = []
+                                 all_card_names_simple = [c["name"].split(',')[0].strip().lower() for c in cards_to_check]
+                                 status_text = st.empty() # Placeholder for status messages
+                                 
+                                 for i, card in enumerate(cards_to_check[:3]):
+                                    card_name = card["name"]
+                                    # Simplify current card name too for self-exclusion logic
+                                    card_simple = card_name.split(',')[0].strip().lower()
+                                    
+                                    status_text.info(f"⏳ Cerco ruling OCG per: **{card_name}**... ({i+1}/{len(cards_to_check[:3])})")
+                                    
+                                    try:
+                                        # Modified Scraper returns (text, log) tuple
+                                        # Pass other cards as keywords for Deep Clicking
+                                        other_cards_simple = [n for n in all_card_names_simple if n != card_simple]
+                                        
+                                        text_res, debug_log_res = scraper.search_ygoresources_ruling(
+                                            card_name, 
+                                            cross_ref_keywords=other_cards_simple if len(cards_to_check) > 1 else None
+                                        )
+                                        
+                                        if text_res:
+                                            # 4. CROSS-REFERENCE FILTERING
+                                            if len(cards_to_check) > 1:
+                                                # We want lines that mention ANY of the OTHER cards (simplified names)
+                                                other_cards_simple = [n for n in all_card_names_simple if n != card_simple]
+                                                
+                                                if any(other in text_res.lower() for other in other_cards_simple):
+                                                     found_rulings.append(f"**{card_name}** (Found interactions):\n{text_res}")
+                                                else:
+                                                     pass
 
-                         if scraper:
-                             # 3. Ciclo di Ricerca su TUTTE le carte trovate (Max 3)
-                             found_rulings = []
-                             
-                             # Simplify names for better matching: "Nibiru, the Primal Being" -> "nibiru"
-                             all_card_names_simple = [c["name"].split(',')[0].strip().lower() for c in cards_to_check]
-                             # Also keep full names for display/safety
-                             
-                             status_text = st.empty()
-                             
-                             for i, card in enumerate(cards_to_check[:3]):
-                                card_name = card["name"]
-                                # Simplify current card name too for self-exclusion logic
-                                card_simple = card_name.split(',')[0].strip().lower()
-                                
-                                status_text.info(f"⏳ Cerco ruling OCG per: **{card_name}**... ({i+1}/{len(cards_to_check[:3])})")
-                                
-                                try:
-                                    # Modified Scraper returns (text, log) tuple
-                                    # Pass other cards as keywords for Deep Clicking
-                                    other_cards_simple = [n for n in all_card_names_simple if n != card_simple]
-                                    
-                                    text_res, debug_log_res = scraper.search_ygoresources_ruling(
-                                        card_name, 
-                                        cross_ref_keywords=other_cards_simple if len(cards_to_check) > 1 else None
-                                    )
-                                    
-                                    if text_res:
-                                        # 4. CROSS-REFERENCE FILTERING
-                                        if len(cards_to_check) > 1:
-                                            # We want lines that mention ANY of the OTHER cards (simplified names)
-                                            other_cards_simple = [n for n in all_card_names_simple if n != card_simple]
-                                            
-                                            if any(other in text_res.lower() for other in other_cards_simple):
-                                                 found_rulings.append(f"**{card_name}** (Found interactions):\n{text_res}")
                                             else:
-                                                 pass
-
+                                                found_rulings.append(f"**{card_name}**:\n{text_res}")
                                         else:
-                                            found_rulings.append(f"**{card_name}**:\n{text_res}")
-                                    else:
-                                        print(f"DEBUG: Scraper returned None for {card_name}")
-                                            
-                                except Exception as e:
-                                    print(f"Skip {card_name}: {e}")
-                                    debug_log_res = f"Exception: {e}"
+                                            print(f"DEBUG: Scraper returned None for {card_name}")
+                                                
+                                    except Exception as e:
+                                        print(f"Skip {card_name}: {e}")
+                                        debug_log_res = f"Exception: {e}"
 
-                             status_text.empty()
-                             
-                             if found_rulings:
-                                 st.info("📜 **Rulings OCG Trovati (Cross-References):**")
-                                 final_ruling_text = "\n\n".join(found_rulings)
-                                 st.code(final_ruling_text, language="text")
+                                 status_text.empty()
                                  
-                                 # --- NEW: AUTO-REEVALUATION ---
-                                 st.markdown("### 🧠 Rivalutazione con Ruling OCG...")
-                                 with st.spinner("Il Giudice sta rileggendo il caso alla luce dei nuovi ruling..."):
-                                     try:
-                                         # Re-construct context from session state
-                                         cards_context_reval = ""
-                                         cached_cards = st.session_state.get("found_cards_cache", [])
-                                         for c in cached_cards:
-                                              cards_context_reval += f"NOME UFFICIALE: {c['name']}\nTESTO: {c['desc']}\n\n"
-                                         
-                                         judge_model, model_name = resolve_working_model()
-                                         
-                                         reval_prompt = f"""
-                                         SEI UN HEAD JUDGE DI YU-GI-OH.
-                                         
-                                         SITUAZIONE PRECEDENTE:
-                                         Hai dato un verdetto su una domanda dell'utente.
-                                         Tuttavia, sono stati appena trovati dei **RULING UFFICIALI OCG (Giapponesi)** specifici per questo caso.
-                                         
-                                         I ruling OCG hanno la precedenza tecnica su qualsiasi logica generale.
-                                         
-                                         TESTO CARTE:
-                                         {cards_context_reval}
-                                         
-                                         NUOVI RULING TROVATI (EVIDENZA CRITICA):
-                                         ---
-                                         {final_ruling_text}
-                                         ---
-                                         
-                                         DOMANDA UTENTE:
-                                         "{st.session_state.question_text}"
-                                         
-                                         COMPITO:
-                                         1. Leggi attentamente i nuovi ruling trovati.
-                                         2. Se contraddicono la tua logica precedente, AMMETTILO e correggi il verdetto.
-                                         3. Se confermano la tua logica, usali come prova definitiva.
-                                         4. Fornisci un verdetto finale SINTETICO ma TECNICO.
-                                         
-                                         FORMATO RISPOSTA:
-                                         "Verdetto Aggiornato: [Sì/No/Dipende]"
-                                         "Spiegazione: [Spiegazione tecnica citando il ruling]"
-                                         """
-                                         
-                                         reval_response = judge_model.generate_content(reval_prompt)
-                                         
-                                         st.success("Verdetto Aggiornato (Basato su OCG):")
-                                         st.write(reval_response.text)
-                                         st.toast("Verdetto aggiornato con successo!")
-                                         
-                                     except Exception as reval_e:
-                                         st.error(f"Errore durante la rivalutazione: {reval_e}")
-
-                             else:
-                                 st.warning(f"Nessun ruling specifico incrociato trovato per: {', '.join([c['name'] for c in cards_to_check])}.")
-                                 
-                                 # DEBUG AREA - Only shown on failure
-                                 with st.expander("🐛 Debug Data (Clicca se non trovi nulla)"):
-                                     st.write("Dati estratti dal scraper:")
-                                     st.write(f"- Carte cercate: {all_card_names_simple}")
-                                     st.write(f"- Metodo Scraper Reloaded: {'search_ygoresources_ruling' in dir(scraper)}")
+                                 if found_rulings:
+                                     st.info("📜 **Rulings OCG Trovati (Cross-References):**")
+                                     final_ruling_text = "\n\n".join(found_rulings)
+                                     st.code(final_ruling_text, language="text")
                                      
-                                     # Display the log from the LAST attempt (which likely failed or was empty)
-                                     if 'debug_log_res' in locals():
-                                          # Try to infer which card this log belongs to by looking at the log content?
-                                          # Or just generic label.
-                                          st.write(f"- Ultimo Log di Esecuzione:")
-                                          st.text(debug_log_res)
-                                     else:
-                                          # Fallback: Force run test on first card
-                                          test_name = cards_to_check[0]["name"]
-                                          st.write(f"- Test Run Forzato per '{test_name}':")
-                                          try:
-                                               _, fresh_log = scraper.search_ygoresources_ruling(test_name)
-                                               st.text(fresh_log)
-                                          except Exception as ex:
-                                               st.error(str(ex))
-                                     
-                    else:
-                         st.warning("Nessuna carta identificata per la ricerca. Riprova a formulare la domanda.")
+                                     # --- NEW: AUTO-REEVALUATION ---
+                                     st.markdown("### 🧠 Rivalutazione con Ruling OCG...")
+                                     with st.spinner("Il Giudice sta rileggendo il caso alla luce dei nuovi ruling..."):
+                                         try:
+                                             # Re-construct context from session state
+                                             cards_context_reval = ""
+                                             cached_cards = st.session_state.get("found_cards_cache", [])
+                                             for c in cached_cards:
+                                                  cards_context_reval += f"NOME UFFICIALE: {c['name']}\nTESTO: {c['desc']}\n\n"
+                                             
+                                             judge_model, model_name = resolve_working_model()
+                                             
+                                             reval_prompt = f"""
+                                             SEI UN HEAD JUDGE DI YU-GI-OH.
+                                             
+                                             SITUAZIONE PRECEDENTE:
+                                             Hai dato un verdetto su una domanda dell'utente.
+                                             Tuttavia, sono stati appena trovati dei **RULING UFFICIALI OCG (Giapponesi)** specifici per questo caso.
+                                             
+                                             I ruling OCG hanno la precedenza tecnica su qualsiasi logica generale.
+                                             
+                                             TESTO CARTE:
+                                             {cards_context_reval}
+                                             
+                                             NUOVI RULING TROVATI (EVIDENZA CRITICA):
+                                             ---
+                                             {final_ruling_text}
+                                             ---
+                                             
+                                             DOMANDA UTENTE:
+                                             "{st.session_state.question_text}"
+                                             
+                                             COMPITO:
+                                             1. Leggi attentamente i nuovi ruling trovati.
+                                             2. Se contraddicono la tua logica precedente, AMMETTILO e correggi il verdetto.
+                                             3. Se confermano la tua logica, usali come prova definitiva.
+                                             4. Fornisci un verdetto finale SINTETICO ma TECNICO.
+                                             
+                                             FORMATO RISPOSTA:
+                                             "Verdetto Aggiornato: [Sì/No/Dipende]"
+                                             "Spiegazione: [Spiegazione tecnica citando il ruling]"
+                                             """
+                                             
+                                             reval_response = judge_model.generate_content(reval_prompt)
+                                             
+                                             st.success("Verdetto Aggiornato (Basato su OCG):")
+                                             st.write(reval_response.text)
+                                             st.toast("Verdetto aggiornato con successo!")
+                                             
+                                         except Exception as reval_e:
+                                             st.error(f"Errore durante la rivalutazione: {reval_e}")
 
-            with col_new:
-                if st.button("Nuova Domanda 🔄"):
-                    reset_judge()
-        
-            # --- FASE 4: CONVERSATIONAL JUDGE (Follow-up Chat) ---
-            st.divider()
-            st.markdown("### 💬 Chiedi chiarimenti al Giudice")
-            st.markdown("Hai dubbi sul verdetto? Chiedi pure qui sotto. Il Giudice ricorda il contesto!")
-            
-            # 1. Display History
-            for message in st.session_state.judge_chat_history:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
-            
-            # 2. Chat Input
-            if user_query := st.chat_input("Esempio: 'Ma se incateno X prima?'"):
-                
-                # Append user message
-                st.session_state.judge_chat_history.append({"role": "user", "content": user_query})
-                with st.chat_message("user"):
-                    st.markdown(user_query)
-                
-                # 3. Generate Answer
-                with st.chat_message("assistant"):
-                    with st.spinner("Il Giudice sta riflettendo..."):
-                        try:
-                            # Re-construct context
-                            current_verdict_short = st.session_state.verdict_short
-                            current_verdict_deep = st.session_state.verdict_deep
-                            
-                            # Retrieve OCG Rulings Text if relevant (it's not easily accessible unless we persisted it)
-                            # We can just say "OCG Rulings found earlier" or try to scrape the Code block? 
-                            # Better: We rely on the fact that if OCG rulings were found, the "Cards Context" 
-                            # variable we construct below might miss them if we don't persist 'found_rulings'.
-                            # FOR NOW: Let's use the standard Card Context + Verdict.
-                            
-                            # Construct Context Prompt
-                            chat_context_prompt = f"""
-                            SEI L'HEAD JUDGE DI PRMA.
-                            
-                            CONTESTO UFFICIALE:
-                            Hai appena emesso il seguente verdetto:
-                            "{current_verdict_short}"
-                            
-                            Dettagli tecnici forniti:
-                            "{current_verdict_deep}"
-                            
-                            SCENARIO ORIGINALE:
-                            "{st.session_state.question_text}"
-                            
-                            NUOVA DOMANDA UTENTE (Chat):
-                            "{user_query}"
-                            
-                            COMPITO:
-                            Rispondi alla nuova domanda dell'utente rimanendo coerente con il verdetto che hai già dato.
-                            Sii sintetico, diretto e professionale.
-                            """
-                            
-                            # Call Model
-                            chat_response = get_gemini_response(judge_model, chat_context_prompt)
-                            
-                            st.markdown(chat_response)
-                            st.session_state.judge_chat_history.append({"role": "assistant", "content": chat_response})
-                            
-                        except Exception as chat_e:
-                            st.error(f"Errore chat: {chat_e}")
+                                 else:
+                                     st.warning(f"Nessun ruling specifico incrociato trovato per: {', '.join([c['name'] for c in cards_to_check])}.")
+                                     
+                                     # DEBUG AREA - Only shown on failure
+                                     with st.expander("🐛 Debug Data (Clicca se non trovi nulla)"):
+                                         st.write("Dati estratti dal scraper:")
+                                         st.write(f"- Carte cercate: {all_card_names_simple}")
+                                         st.write(f"- Metodo Scraper Reloaded: {'search_ygoresources_ruling' in dir(scraper)}")
+                                         
+                                         # Display the log from the LAST attempt (which likely failed or was empty)
+                                         if 'debug_log_res' in locals():
+                                              # Try to infer which card this log belongs to by looking at the log content?
+                                              # Or just generic label.
+                                              st.write(f"- Ultimo Log di Esecuzione:")
+                                              st.text(debug_log_res)
+                                         else:
+                                              # Fallback: Force run test on first card
+                                              test_name = cards_to_check[0]["name"]
+                                              st.write(f"- Test Run Forzato per '{test_name}':")
+                                              try:
+                                                   _, fresh_log = scraper.search_ygoresources_ruling(test_name)
+                                                   st.text(fresh_log)
+                                              except Exception as ex:
+                                                   st.error(str(ex))
+
 
 elif mode == "📊 Meta Analyst":
     st.title("Meta Analyst 📊")
