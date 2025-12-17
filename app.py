@@ -977,8 +977,18 @@ elif mode == "📊 Meta Analyst":
                         
                         try:
                             # Usa il nuovo metodo Playwright (ultimi 60 giorni)
-                            st.write("🗓️ Scansione ultimi 2 mesi (60 giorni)...")
-                            found_links = scraper_tool.get_ygoprodeck_tournaments(days_lookback=60)
+                            # Usa il nuovo metodo Playwright (ultimi 60 giorni)
+
+                            
+                            found_links = []
+                            with st.status("🔍 Inizializzazione Scraper & Browser...", expanded=True) as status:
+                                st.write("🚀 Avvio Playwright (Installazione browser se necessario)...")
+                                try:
+                                    found_links = scraper_tool.get_ygoprodeck_tournaments(days_lookback=60)
+                                    status.update(label=f"✅ Scansione completata! Trovati {len(found_links)} tornei.", state="complete", expanded=False)
+                                except Exception as e:
+                                    status.update(label="❌ Errore durante la scansione", state="error")
+                                    st.error(f"Errore critico nello scraper: {e}")
                             
                             if found_links:
                                 st.success(f"✅ Trovati {len(found_links)} tornei nel periodo!")
