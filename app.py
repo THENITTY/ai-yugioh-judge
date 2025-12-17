@@ -1548,7 +1548,7 @@ elif mode == "📊 Meta Analyst":
                                             for i, card in enumerate(sub_cards):
                                                 col_idx = i % 8
                                                 with cols[col_idx]:
-                                                    st.image(card['url'], use_column_width=True)
+                                                    render_responsive_image(card['url'])
                                 
                                 # 2. EXTRA DECK: Sort by Type (Fused together)
                                 elif sec_name == "Extra Deck":
