@@ -1,5 +1,6 @@
 # IMPORTS
 import os
+import gc # FIX: Added missing import
 import streamlit as st
 import google.generativeai as genai
 import requests
