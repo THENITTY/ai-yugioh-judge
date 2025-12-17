@@ -766,10 +766,11 @@ if mode == "👨‍⚖️ AI Judge":
                                  importlib.reload(yugioh_scraper)
                                  from yugioh_scraper import YuGiOhMetaScraper
                                  scraper = YuGiOhMetaScraper()
-                                 # (Simple execution logic for now, results shown in status or toast)
-                                 # (Simple execution logic for now, results shown in status or toast)
-                                 # st.info("Ricerca avviata nei log (funzionalità sperimentale)...")
+                             except Exception as e:
+                                 scraper = None
+                                 # st.error(f"Errore scraper: {e}")
                                  
+                             if scraper:
                                  # Initialize these for the loop
                                  found_rulings = []
                                  all_card_names_simple = [c["name"].split(',')[0].strip().lower() for c in cards_to_check]
@@ -871,30 +872,7 @@ if mode == "👨‍⚖️ AI Judge":
                                          except Exception as reval_e:
                                              st.error(f"Errore durante la rivalutazione: {reval_e}")
 
-                                 else:
-                                     st.warning(f"Nessun ruling specifico incrociato trovato per: {', '.join([c['name'] for c in cards_to_check])}.")
-                                     
-                                     # DEBUG AREA - Only shown on failure
-                                     with st.expander("🐛 Debug Data (Clicca se non trovi nulla)"):
-                                         st.write("Dati estratti dal scraper:")
-                                         st.write(f"- Carte cercate: {all_card_names_simple}")
-                                         st.write(f"- Metodo Scraper Reloaded: {'search_ygoresources_ruling' in dir(scraper)}")
-                                         
-                                         # Display the log from the LAST attempt (which likely failed or was empty)
-                                         if 'debug_log_res' in locals():
-                                              # Try to infer which card this log belongs to by looking at the log content?
-                                              # Or just generic label.
-                                              st.write(f"- Ultimo Log di Esecuzione:")
-                                              st.text(debug_log_res)
-                                         else:
-                                              # Fallback: Force run test on first card
-                                              test_name = cards_to_check[0]["name"]
-                                              st.write(f"- Test Run Forzato per '{test_name}':")
-                                              try:
-                                                   _, fresh_log = scraper.search_ygoresources_ruling(test_name)
-                                                   st.text(fresh_log)
-                                              except Exception as ex:
-                                                   st.error(str(ex))
+
 
 
 elif mode == "📊 Meta Analyst":
