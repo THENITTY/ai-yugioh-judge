@@ -1309,126 +1309,126 @@ elif mode == "📊 Meta Analyst":
                          st.info("Nessun vincitore trovato tra i Top 6 mazzi filtrati.")
 
             # --- 3. TECH & STAPLE ANALYSIS (NEW) ---
-            st.divider()
             # --- 3. TECH & STAPLE ANALYSIS (NEW) ---
             st.divider()
-            with st.expander("📉 Analisi Tech & Staple (No AI)", expanded=False):
-                st.caption("Statistiche calcolate in tempo reale sui mazzi filtrati.")
+            st.markdown("### 📉 Analisi Tech & Staple (No AI)")
+            st.caption("Statistiche calcolate in tempo reale sui mazzi filtrati.")
+            
+            # Helper to count cards
+            # items have 'raw_main', 'raw_side', 'raw_extra'
+            
+            # BUGFIX: Only count decks that actully have a list!
+            valid_items = [i for i in filtered_items if i.get("raw_main")]
+            total_decks = len(valid_items)
+            
+            if total_decks > 0:
+                main_counts = {} # name -> count of DECKS containing it (not total copies)
+                side_counts = {}
+                extra_counts = {}
                 
-                # Helper to count cards
-                # items have 'raw_main', 'raw_side', 'raw_extra'
+                # We want representation % (Usage Rate)
+                # i.e. "Ash Blossom" is in 80% of decks.
                 
-                # BUGFIX: Only count decks that actully have a list!
-                valid_items = [i for i in filtered_items if i.get("raw_main")]
-                total_decks = len(valid_items)
+                for item in valid_items:
+                    # Helper for extraction
+                    def extract_unique_names(raw_list):
+                        names = set()
+                        for c_entry in raw_list:
+                            c_name = c_entry.get("card", {}).get("name")
+                            if c_name: names.add(c_name)
+                        return names
+
+                    # Main
+                    for c in extract_unique_names(item.get("raw_main", [])):
+                        main_counts[c] = main_counts.get(c, 0) + 1
+                        
+                    # Side
+                    for c in extract_unique_names(item.get("raw_side", [])):
+                        side_counts[c] = side_counts.get(c, 0) + 1
+                        
+                    # Extra
+                    for c in extract_unique_names(item.get("raw_extra", [])):
+                        extra_counts[c] = extra_counts.get(c, 0) + 1
                 
-                if total_decks > 0:
-                    main_counts = {} # name -> count of DECKS containing it (not total copies)
-                    side_counts = {}
-                    extra_counts = {}
-                    
-                    # We want representation % (Usage Rate)
-                    # i.e. "Ash Blossom" is in 80% of decks.
-                    
-                    for item in valid_items:
-                        # Helper for extraction
-                        def extract_unique_names(raw_list):
-                            names = set()
-                            for c_entry in raw_list:
-                                c_name = c_entry.get("card", {}).get("name")
-                                if c_name: names.add(c_name)
-                            return names
+                # Sort by frequency
+                sorted_main = sorted(main_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+                sorted_side = sorted(side_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+                sorted_extra = sorted(extra_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+                
+                # CSS to Hide Toolbar for a specialized minimal look
+                st.markdown("""
+                <style>
+                [data-testid="stElementToolbar"] {
+                    display: none;
+                }
+                </style>
+                """, unsafe_allow_html=True)
+                
+                # Helper for DataFrame
+                def create_stat_df(sorted_data, total):
+                    data = []
+                    for name, count in sorted_data:
+                        pct = (count / total) * 100
+                        # FORMAT: Strigified percentage for cleaner look
+                        data.append({"Carta": name, "%": f"{int(pct)}%"}) 
+                    return pd.DataFrame(data)
 
-                        # Main
-                        for c in extract_unique_names(item.get("raw_main", [])):
-                            main_counts[c] = main_counts.get(c, 0) + 1
-                            
-                        # Side
-                        for c in extract_unique_names(item.get("raw_side", [])):
-                            side_counts[c] = side_counts.get(c, 0) + 1
-                            
-                        # Extra
-                        for c in extract_unique_names(item.get("raw_extra", [])):
-                            extra_counts[c] = extra_counts.get(c, 0) + 1
-                    
-                    # Sort by frequency
-                    sorted_main = sorted(main_counts.items(), key=lambda x: x[1], reverse=True)[:10]
-                    sorted_side = sorted(side_counts.items(), key=lambda x: x[1], reverse=True)[:10]
-                    sorted_extra = sorted(extra_counts.items(), key=lambda x: x[1], reverse=True)[:10]
-                    
-                    # CSS to Hide Toolbar for a specialized minimal look
-                    st.markdown("""
-                    <style>
-                    [data-testid="stElementToolbar"] {
-                        display: none;
-                    }
-                    </style>
-                    """, unsafe_allow_html=True)
-                    
-                    # Helper for DataFrame
-                    def create_stat_df(sorted_data, total):
-                        data = []
-                        for name, count in sorted_data:
-                            pct = (count / total) * 100
-                            # FORMAT: Strigified percentage for cleaner look
-                            data.append({"Carta": name, "%": f"{int(pct)}%"}) 
-                        return pd.DataFrame(data)
-
-                    # --- VERTICAL EXPANDER LAYOUT ---
-                    
-                    with st.expander("⚔️ Top Main Deck", expanded=False):
-                        df_main = create_stat_df(sorted_main, total_decks)
-                        st.dataframe(
-                            df_main,
-                            hide_index=True,
-                            use_container_width=True
-                        )
-
-                    with st.expander("🛡️ Top Side Deck", expanded=False):
-                        df_side = create_stat_df(sorted_side, total_decks)
-                        st.dataframe(
-                            df_side,
-                            hide_index=True,
-                            use_container_width=True
-                        )
-                            
-                    with st.expander("🟣 Top Extra Deck", expanded=False):
-                        df_extra = create_stat_df(sorted_extra, total_decks)
-                        st.dataframe(
-                            df_extra,
-                            hide_index=True,
-                            use_container_width=True
-                        )
-                            
-                    st.divider()
-                    st.markdown("#### 🔎 Cerca Carta")
-                    
-                    # Collect ALL unique card names for the dropdown
-                    all_card_names = sorted(list(set(list(main_counts.keys()) + list(side_counts.keys()) + list(extra_counts.keys()))))
-                    
-                    search_card = st.selectbox(
-                        "Seleziona una carta per vedere le statistiche:",
-                        options=[""] + all_card_names,
-                        index=0,
-                        placeholder="Digita il nome della carta..."
+                # --- VERTICAL EXPANDER LAYOUT ---
+                
+                with st.expander("⚔️ Top Main Deck", expanded=False):
+                    df_main = create_stat_df(sorted_main, total_decks)
+                    st.dataframe(
+                        df_main,
+                        hide_index=True,
+                        use_container_width=True
                     )
 
-                    if search_card:
-                         m_count = main_counts.get(search_card, 0)
-                         s_count = side_counts.get(search_card, 0)
-                         e_count = extra_counts.get(search_card, 0)
+                with st.expander("🛡️ Top Side Deck", expanded=False):
+                    df_side = create_stat_df(sorted_side, total_decks)
+                    st.dataframe(
+                        df_side,
+                        hide_index=True,
+                        use_container_width=True
+                    )
+                        
+                with st.expander("🟣 Top Extra Deck", expanded=False):
+                    df_extra = create_stat_df(sorted_extra, total_decks)
+                    st.dataframe(
+                        df_extra,
+                        hide_index=True,
+                        use_container_width=True
+                    )
+
+                # --- 4. AUTOCOMPLETE SEARCH ---
+                st.divider()
+                st.markdown("#### 🔎 Cerca Percentuale Carta")
+                
+                # Collect ALL unique card names for the dropdown
+                all_card_names = sorted(list(set(list(main_counts.keys()) + list(side_counts.keys()) + list(extra_counts.keys()))))
+                
+                search_card = st.selectbox(
+                    "Seleziona una carta per vedere le statistiche:",
+                    options=[""] + all_card_names,
+                    index=0,
+                    placeholder="Digita il nome della carta..."
+                )
+
+                if search_card:
+                     m_count = main_counts.get(search_card, 0)
+                     s_count = side_counts.get(search_card, 0)
+                     e_count = extra_counts.get(search_card, 0)
+                     
+                     m_pct = int((m_count / total_decks) * 100)
+                     s_pct = int((s_count / total_decks) * 100)
+                     e_pct = int((e_count / total_decks) * 100)
+                     
+                     res_col1, res_col2, res_col3 = st.columns(3)
+                     res_col1.metric("Main Deck", f"{m_pct}%")
+                     res_col2.metric("Side Deck", f"{s_pct}%")
+                     res_col3.metric("Extra Deck", f"{e_pct}%")
                          
-                         m_pct = int((m_count / total_decks) * 100)
-                         s_pct = int((s_count / total_decks) * 100)
-                         e_pct = int((e_count / total_decks) * 100)
-                         
-                         res_col1, res_col2, res_col3 = st.columns(3)
-                         res_col1.metric("Main Deck", f"{m_pct}%")
-                         res_col2.metric("Side Deck", f"{s_pct}%")
-                         res_col3.metric("Extra Deck", f"{e_pct}%")
-                         
-                else:
-                    st.info("Nessun dato grezzo disponibile per l'analisi Tech. Prova ad aggiornare il database.")
+            else:
+                st.info("Nessun dato grezzo disponibile per l'analisi Tech. Prova ad aggiornare il database.")
 
             # --- INTERACTIVE DECK INSPECTOR ---
             st.subheader("🔍 Ispeziona Decklist")
