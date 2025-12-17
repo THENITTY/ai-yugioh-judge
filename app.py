@@ -1120,14 +1120,13 @@ elif mode == "📊 Meta Analyst":
                                     # 2. ESECUZIONE PARALLELA (Fetch Deck Lists)
                                     if tasks:
                                         status_text.markdown(f"**Analisi Torneo {u_idx + 1}/{total_urls_to_scrape}**: *{page_title}* - Analisi {len(tasks)} mazzi in corso...")
-                                        # Reduced workers to prevent OOM on Cloud Free Tier
-                                        with ThreadPoolExecutor(max_workers=4) as executor:
+                                        # Strict RAM Control: 2 Workers
+                                        with ThreadPoolExecutor(max_workers=2) as executor:
                                             future_to_idx = {executor.submit(scrape_deck_list, t[1]): t[0] for t in tasks}
                                             
                                             for future in as_completed(future_to_idx):
                                                 idx = future_to_idx[future]
                                                 try:
-                                                    # Fix: Now unpacking 4 values (including extra)
                                                     content, raw_main, raw_side, raw_extra = future.result()
                                                     if content:
                                                         processed_items[idx]["details"] = f"\n   [DETTAGLIO DECK]\n   {content.replace(chr(10), chr(10)+'   ')}\n"
@@ -1137,16 +1136,24 @@ elif mode == "📊 Meta Analyst":
                                                 except Exception as exc:
                                                     pass
 
-                                    # 3. GENERAZIONE REPORT (per singolo URL, ma non per aggregated_text finale)
-                                    # This part is now only for scan_log, aggregated_text will be built globally later
+                                    # 3. REPORTING
                                     analyzed_count += 1
                                     scan_log.append(f"✅ Letto: {page_title}")
-                                    
-                                    # ACCUMULATE GLOBALLY
                                     all_processed_items_global.extend(processed_items)
                                 
                             except Exception as e:
                                 scan_log.append(f"❌ Errore {url}: {e}")
+                            
+                            finally:
+                                # AGGRESSIVE MEMORY CLEANUP
+                                try:
+                                    if 'soup' in locals(): del soup
+                                    if 'resp' in locals(): del resp
+                                    if 'processed_items' in locals(): del processed_items
+                                    if 'div_table' in locals(): del div_table
+                                except: pass
+                                gc.collect()
+                                time.sleep(0.5) # Yield CPU
                             
                         # Finalize Progress
                         progress_bar.progress(1.0)
