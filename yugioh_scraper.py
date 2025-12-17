@@ -212,6 +212,8 @@ class YuGiOhMetaScraper:
         import time
         from datetime import datetime, timedelta
         import re
+        import subprocess
+        import os
         
         links = []
         url = "https://ygoprodeck.com/tournaments/?type=Tier%202%20-%20Major%20Events"
@@ -221,10 +223,20 @@ class YuGiOhMetaScraper:
         
         try:
             with sync_playwright() as p:
-                browser = p.chromium.launch(
-                    headless=True,
-                    args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
-                )
+                # AUTO-INSTALL FIX FOR CLOUD ENVIRONMENTS (Hugging Face)
+                try:
+                    browser = p.chromium.launch(
+                        headless=True,
+                        args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+                    )
+                except Exception as e:
+                    print(f"Browser launch failed, attempting install... Error: {e}")
+                    subprocess.run(["playwright", "install", "chromium"], check=True)
+                    browser = p.chromium.launch(
+                        headless=True,
+                        args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+                    )
+
                 page = browser.new_page()
                 page.goto("https://ygoprodeck.com/tournaments/", timeout=60000)
                 
