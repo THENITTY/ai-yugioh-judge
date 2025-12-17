@@ -931,14 +931,14 @@ elif mode == "📊 Meta Analyst":
     
     with col1:
         # Title is already at the top, just show the specific source info
-        st.subheader(f"Fonte: {meta_source}")
+        # st.subheader(f"Fonte: {meta_source}") # REMOVED REDUNDANT HEADER
         
         
         # ==========================================
         # MODALITÀ: YGOProDeck (Principale)
         # ==========================================
         if meta_source == "YGOProDeck (TCG)":
-            if st.button("🔄 Aggiorna Database Meta (TCG)"):
+            if st.button("🔄 Scansiona Nuovi Tornei", type="primary"):
                 with st.spinner("Scansiono il Web (Tornei Recenti)..."):
                     try:
                         # CONFIGURAZIONE
@@ -1251,7 +1251,7 @@ elif mode == "📊 Meta Analyst":
             from collections import Counter
             
             if not filtered_items:
-                 st.warning("⚠️ Nessun dato utile trovato con i filtri correnti.")
+                 st.info("💡 Nessun dato locale. Avvia la scansione per iniziare.") # CLEANER EMPTY STATE
             else:
                  # 1. TOP 4 PERFORMING DECKS (REACTIVE)
                  # Filter out empty strings/whitespace
