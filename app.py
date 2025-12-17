@@ -1165,37 +1165,82 @@ elif mode == "📊 Meta Analyst":
             st.divider()
             st.subheader("📊 Analisi Dati Meta")
             
-            structured_data = st.session_state.meta_structured_data
-            if not structured_data:
-                 st.warning("⚠️ Nessun dato utile trovato. Controlla i filtri.")
+            all_items = st.session_state.get("meta_all_items_global", [])
+            
+            # --- FILTERS UI (MOVED TO TOP) ---
+            st.markdown("### 🌪️ Filtri Ispezione")
+            f_col1, f_col2, f_col3 = st.columns(3)
+            
+            # 1. Extract Countries & Types
+            all_countries = sorted(list(set([i.get('country', 'Unknown') for i in all_items])))
+            all_types = sorted(list(set([i.get('event_type', 'Other') for i in all_items])))
+            
+            # Fix for potential 0 max_players causing Slider Error
+            p_counts = [i.get('players', 0) for i in all_items]
+            max_players = max(p_counts) if p_counts and max(p_counts) > 0 else 100
+            
+            with f_col1:
+                sel_countries = st.multiselect("🌍 Paese", options=all_countries, default=[]) # Empty default = All
+            with f_col2:
+                sel_types = st.multiselect("🏆 Tipo Evento", options=all_types, default=[]) # Empty default = All
+            with f_col3:
+                min_p = st.slider("👥 Min. Players", 0, max_players, 0, step=10)
+            
+            # FILTER LOGIC
+            filtered_items = []
+            for item in all_items:
+                # Logic: If list is empty, treat as "All Selected". Else, check existence.
+                country_match = (not sel_countries) or (item.get('country', 'Unknown') in sel_countries)
+                type_match = (not sel_types) or (item.get('event_type', 'Other') in sel_types)
+                player_match = item.get('players', 0) >= min_p
+                
+                if country_match and type_match and player_match:
+                    filtered_items.append(item)
+            
+            st.caption(f"Mostrando {len(filtered_items)} su {len(all_items)} mazzi.")
+            st.divider()
+
+            # --- REACTIVE STATS (CALCULATED ON FILTERED ITEMS) ---
+            from collections import Counter
+            
+            if not filtered_items:
+                 st.warning("⚠️ Nessun dato utile trovato con i filtri correnti.")
             else:
-                 # 1. TOP 4 PERFORMING DECKS
+                 # 1. TOP 4 PERFORMING DECKS (REACTIVE)
+                 # Filter out empty strings/whitespace
+                 all_decks_found = [item['deck_text'] for item in filtered_items if item.get('deck_text') and item['deck_text'].strip()]
+                 deck_counts = Counter(all_decks_found)
+                 
+                 structured_data = [{"name": k, "count": v} for k, v in deck_counts.items()]
                  sorted_decks = sorted(structured_data, key=lambda x: x['count'], reverse=True)
                  top_4 = sorted_decks[:4]
                  
                  col_top, col_conv = st.columns(2)
                  
                  with col_top:
-                     st.write("#### 🏆 Top 4 Mazzi (Per Numero di Top)")
+                     st.write("#### 🏆 Top 4 Mazzi (Filtrati)")
                      for i, d in enumerate(top_4):
                          st.write(f"**#{i+1} {d['name']}** - {d['count']} Top")
                          
-                 # 2. BEST CONVERSION (Top 6 Only)
+                 # 2. BEST CONVERSION (Top 6 REACTIVE)
                  top_6_names = [d['name'] for d in sorted_decks[:6]]
                  best_conversion_deck = None
                  best_rate = -1.0
                  conversion_stats = {}
                  
-                 if "meta_detailed" in st.session_state:
-                     for item in st.session_state.meta_detailed:
-                         d_name = item['name']
-                         p_text = item['place'].lower()
-                         is_winner = "winner" in p_text or "1st" in p_text
-                         
-                         if d_name not in conversion_stats: conversion_stats[d_name] = {"wins": 0, "total": 0}
-                         conversion_stats[d_name]["total"] += 1
-                         if is_winner: conversion_stats[d_name]["wins"] += 1
+                 # Calc stats on filtered items
+                 for item in filtered_items:
+                     d_name = item.get('deck_text')
+                     if not d_name or not d_name.strip(): continue
+                     
+                     p_text = item.get('place', '').lower()
+                     is_winner = "winner" in p_text or "1st" in p_text
+                     
+                     if d_name not in conversion_stats: conversion_stats[d_name] = {"wins": 0, "total": 0}
+                     conversion_stats[d_name]["total"] += 1
+                     if is_winner: conversion_stats[d_name]["wins"] += 1
                  
+                 # Find best rate among top 6
                  for d_name, stats in conversion_stats.items():
                       if d_name in top_6_names: 
                           if stats["total"] > 0:
@@ -1205,236 +1250,166 @@ elif mode == "📊 Meta Analyst":
                                   best_conversion_deck = d_name
                  
                  with col_conv:
-                     st.write("#### 🎯 Best Converter (Tra i Top 6)")
+                     st.write("#### 🎯 Best Converter (Tra i Top 6 Filtrati)")
                      if best_conversion_deck:
                          stats = conversion_stats[best_conversion_deck]
                          pct = int(best_rate * 100)
                          st.success(f"**{best_conversion_deck}**")
-                         st.caption(f"Ha vinto il **{pct}%** delle volte che ha fatto Top ({stats['wins']} Vittorie su {stats['total']} Top).")
+                         st.caption(f"Winrate **{pct}%** ({stats['wins']}/{stats['total']} Top).")
                      else:
-                         st.info("Nessun vincitore trovato tra i Top 6 mazzi.")
+                         st.info("Nessun vincitore trovato tra i Top 6 mazzi filtrati.")
 
-                 st.divider()
+            # --- INTERACTIVE DECK INSPECTOR ---
+            st.subheader("🔍 Ispeziona Decklist")
+            st.caption("Seleziona un giocatore/mazzo per vedere la lista completa.")
+            
+            deck_map = {}
+            for item in filtered_items:
+                # Re-build label - USER REQUESTED FORMAT
+                # "YCS Bologna (Italy) | 1st Place | Nome player | nome deck"
+                event_name = item.get('event_source', 'Event').split(" - ")[0] 
+                place = item.get('place', 'N/A')
+                country = item.get('country', 'Global')
+                player = item.get('player', 'Unknown')
+                deck = item.get('deck_text', 'Unknown Deck')
+                
+                # NEW FORMAT: Event | Country | Place | Player | Deck
+                label = f"{event_name} | {country} | {place} | {player} | {deck}"
+                deck_map[label] = item
+            
+            selected_label = st.selectbox("Scegli Decklist:", options=list(deck_map.keys()), index=None, placeholder="Cerca un mazzo...")
+            if selected_label:
+                item = deck_map[selected_label]
+                with st.expander(f"📂 Lista Carte: {item['deck_text']} ({item['player']})", expanded=False):
+                    col_head1, col_head2 = st.columns([3, 1])
+                    col_head1.markdown(f"**Evento:** {item.get('event_source', 'N/A')}")
+                    col_head2.markdown(f"[🔗 Apri su YGOProDeck]({item['link']})")
+                    
+                    if item['details']:
+                        # PARSE & VISUALIZE DECK
+                        import re
+                        
+                        raw_text = item['details'].replace("[DETTAGLIO DECK]", "").strip()
+                        
+                        # Regex to find: "3x Name <URL>"
+                        sections = {"Main Deck": [], "Extra Deck": [], "Side Deck": []}
+                        current_section = "Main Deck"
+                        
+                        lines = raw_text.split('\n')
+                        for line in lines:
+                            line = line.strip()
+                            if not line: continue
+                            
+                            if "**Main Deck**" in line: 
+                                current_section = "Main Deck"; continue
+                            elif "**Extra Deck**" in line: 
+                                current_section = "Extra Deck"; continue
+                            elif "**Side Deck**" in line: 
+                                current_section = "Side Deck"; continue
+                            
+                            matches = re.findall(r"(\d+)x\s(.*?)\s<(https?://[^>]+)>", line)
+                            for count, name, url in matches:
+                                try:
+                                    cnt = int(count)
+                                    # Multiply images by count for grid view
+                                    for _ in range(cnt):
+                                        sections[current_section].append({"name": name, "url": url})
+                                except: pass
+                        
+                        # RENDER GRID
+                        if "card_db" not in st.session_state:
+                             st.session_state.card_db = load_card_database()
+                        db = st.session_state.card_db
 
-                 # --- INTERACTIVE DECK INSPECTOR ---
-                 st.subheader("🔍 Ispeziona Decklist")
-                 st.caption("Seleziona un giocatore/mazzo per vedere la lista completa.")
-                 
-                 all_items = st.session_state.get("meta_all_items_global", [])
-                 
-                 # --- FILTERS UI ---
-                 st.markdown("### 🌪️ Filtri Ispezione")
-                 f_col1, f_col2, f_col3 = st.columns(3)
-                 
-                 # 1. Extract Countries & Types
-                 all_countries = sorted(list(set([i.get('country', 'Unknown') for i in all_items])))
-                 all_types = sorted(list(set([i.get('event_type', 'Other') for i in all_items])))
-                 
-                 # Fix for potential 0 max_players causing Slider Error
-                 p_counts = [i.get('players', 0) for i in all_items]
-                 max_players = max(p_counts) if p_counts and max(p_counts) > 0 else 100
-                 
-                 with f_col1:
-                     sel_countries = st.multiselect("🌍 Paese", options=all_countries, default=[]) # Empty default = All
-                 with f_col2:
-                     sel_types = st.multiselect("🏆 Tipo Evento", options=all_types, default=[]) # Empty default = All
-                 with f_col3:
-                     min_p = st.slider("👥 Min. Players", 0, max_players, 0, step=10)
-                 
-                 # FILTER LOGIC
-                 filtered_items = []
-                 for item in all_items:
-                     # Logic: If list is empty, treat as "All Selected". Else, check existence.
-                     country_match = (not sel_countries) or (item.get('country', 'Unknown') in sel_countries)
-                     type_match = (not sel_types) or (item.get('event_type', 'Other') in sel_types)
-                     player_match = item.get('players', 0) >= min_p
-                     
-                     if country_match and type_match and player_match:
-                         filtered_items.append(item)
-                 
-                 st.caption(f"Mostrando {len(filtered_items)} su {len(all_items)} mazzi.")
+                        for sec_name, cards in sections.items():
+                            if cards:
+                                
+                                # 1. MAIN DECK & SIDE DECK: Split by Type
+                                if sec_name in ["Main Deck", "Side Deck"]:
+                                    monsters = []
+                                    spells = []
+                                    traps = []
+                                    
+                                    for card in cards:
+                                        c_type = db.get(card['name'], "Monster") # Default to Monster
+                                        if "Spell" in c_type: spells.append(card)
+                                        elif "Trap" in c_type: traps.append(card)
+                                        else: monsters.append(card)
+                                    
+                                    # Render Sub-grids with Headers
+                                    sub_sections = [("Mostri", monsters), ("Magie", spells), ("Trappole", traps)]
+                                    
+                                    st.markdown(f"##### {sec_name} ({len(cards)})")
+                                    for sub_name, sub_cards in sub_sections:
+                                        if sub_cards:
+                                            st.markdown(f"**{sub_name}** ({len(sub_cards)})")
+                                            cols = st.columns(8)
+                                            for i, card in enumerate(sub_cards):
+                                                col_idx = i % 8
+                                                with cols[col_idx]:
+                                                    st.image(card['url'], use_container_width=True)
+                                
+                                # 2. EXTRA DECK: Sort by Type (Fused together)
+                                elif sec_name == "Extra Deck":
+                                    # Custom Sort Order
+                                    def get_extra_sort_index(card):
+                                        c_type = db.get(card['name'], "").lower()
+                                        if "fusion" in c_type: return 0
+                                        if "synchro" in c_type: return 1
+                                        if "xyz" in c_type: return 2
+                                        if "link" in c_type: return 3
+                                        return 4
+                                    
+                                    cards.sort(key=get_extra_sort_index)
+                                    
+                                    st.markdown(f"##### {sec_name} ({len(cards)})")
+                                    cols = st.columns(8)
+                                    for i, card in enumerate(cards):
+                                        col_idx = i % 8
+                                        with cols[col_idx]:
+                                            st.image(card['url'], use_container_width=True)
+                                
+                                else:
+                                    # Fallback
+                                    st.markdown(f"##### {sec_name} ({len(cards)})")
+                                    cols = st.columns(8)
+                                    for i, card in enumerate(cards):
+                                         with cols[i % 8]:
+                                             st.image(card['url'], use_container_width=True)
+                        
+                        # Fallback Text (Formatted for Print)
+                        with st.expander("📋 Copia Lista Testuale"):
+                            if "card_db" not in st.session_state:
+                                 st.session_state.card_db = load_card_database()
+                            db = st.session_state.card_db
+                            
+                            # Re-bucket just for printing text (deduplicated)
+                            from collections import Counter
+                            
+                            def format_section(c_list, label):
+                                if not c_list: return ""
+                                cnt = Counter([c['name'] for c in c_list])
+                                txt = f"--- {label} ---\n"
+                                for n, c in cnt.items(): txt += f"{c}x {n}\n"
+                                return txt + "\n"
 
-                 deck_map = {}
-                 for item in filtered_items:
-                     # Re-build label - USER REQUESTED FORMAT
-                     # "YCS Bologna (Italy) | 1st Place | Nome player | nome deck"
-                     event_name = item.get('event_source', 'Event').split(" - ")[0] # Try to clean up " - Yu-Gi-Oh!..." suffix if present
-                     place = item.get('place', 'N/A')
-                     country = item.get('country', 'Global')
-                     player = item.get('player', 'Unknown')
-                     deck = item.get('deck_text', 'Unknown Deck')
-                     
-                     # NEW FORMAT: Event | Country | Place | Player | Deck
-                     label = f"{event_name} | {country} | {place} | {player} | {deck}"
-                     deck_map[label] = item
-                 
-                 selected_label = st.selectbox("Scegli Decklist:", options=list(deck_map.keys()), index=None, placeholder="Cerca un mazzo...")
-                 
-                 if selected_label:
-                     item = deck_map[selected_label]
-                     with st.expander(f"📂 Lista Carte: {item['deck_text']} ({item['player']})", expanded=False):
-                         col_head1, col_head2 = st.columns([3, 1])
-                         col_head1.markdown(f"**Evento:** {item.get('event_source', 'N/A')}")
-                         col_head2.markdown(f"[🔗 Apri su YGOProDeck]({item['link']})")
-                         
-                         if item['details']:
-                             # PARSE & VISUALIZE DECK
-                             import re
-                             
-                             raw_text = item['details'].replace("[DETTAGLIO DECK]", "").strip()
-                             
-                             # Regex to find: "3x Name <URL>"
-                             # Logic: Split by sections first
-                             sections = {"Main Deck": [], "Extra Deck": [], "Side Deck": []}
-                             current_section = "Main Deck"
-                             
-                             # Clean text lines
-                             lines = raw_text.split('\n')
-                             for line in lines:
-                                 line = line.strip()
-                                 if not line: continue
-                                 
-                                 # Detect Section Headers
-                                 if "**Main Deck**" in line: 
-                                     current_section = "Main Deck"
-                                     continue
-                                 elif "**Extra Deck**" in line: 
-                                     current_section = "Extra Deck"
-                                     continue
-                                 elif "**Side Deck**" in line: 
-                                     current_section = "Side Deck"
-                                     continue
-                                 
-                                 # Regex for individual card tokens
-                                 matches = re.findall(r"(\d+)x\s(.*?)\s<(https?://[^>]+)>", line)
-                                 for count, name, url in matches:
-                                     try:
-                                         cnt = int(count)
-                                         # Multiply images by count for grid view
-                                         for _ in range(cnt):
-                                             sections[current_section].append({"name": name, "url": url})
-                                     except:
-                                         pass
-                             
-                             # RENDER GRID
-                             
-                             # Ensure DB is loaded for sorting
-                             if "card_db" not in st.session_state:
-                                  st.session_state.card_db = load_card_database()
-                             db = st.session_state.card_db
+                            print_text = ""
+                            # Main
+                            m_cards = [c for c in sections["Main Deck"]]
+                            monsters = [c for c in m_cards if "Spell" not in db.get(c['name'], "Monster") and "Trap" not in db.get(c['name'], "Monster")]
+                            spells = [c for c in m_cards if "Spell" in db.get(c['name'], "")]
+                            traps = [c for c in m_cards if "Trap" in db.get(c['name'], "")]
+                            
+                            print_text += format_section(monsters, "Monsters")
+                            print_text += format_section(spells, "Spells")
+                            print_text += format_section(traps, "Traps")
+                            print_text += format_section(sections["Extra Deck"], "Extra Deck")
+                            print_text += format_section(sections["Side Deck"], "Side Deck")
+                            
+                            st.code(print_text)
 
-                             for sec_name, cards in sections.items():
-                                 if cards:
-                                     
-                                     # A. SORTING LOGIC PER SECTION
-                                     
-                                     # 1. MAIN DECK & SIDE DECK: Split by Type
-                                     if sec_name in ["Main Deck", "Side Deck"]:
-                                         monsters = []
-                                         spells = []
-                                         traps = []
-                                         
-                                         for card in cards:
-                                             c_type = db.get(card['name'], "Monster") # Default to Monster
-                                             if "Spell" in c_type: spells.append(card)
-                                             elif "Trap" in c_type: traps.append(card)
-                                             else: monsters.append(card)
-                                         
-                                         # Render Sub-grids with Headers
-                                         sub_sections = [("Mostri", monsters), ("Magie", spells), ("Trappole", traps)]
-                                         
-                                         st.markdown(f"##### {sec_name} ({len(cards)})")
-                                         for sub_name, sub_cards in sub_sections:
-                                             if sub_cards:
-                                                 st.markdown(f"**{sub_name}** ({len(sub_cards)})")
-                                                 cols = st.columns(8)
-                                                 for i, card in enumerate(sub_cards):
-                                                     col_idx = i % 8
-                                                     with cols[col_idx]:
-                                                         st.image(card['url'], use_container_width=True)
-                                     
-                                     # 2. EXTRA DECK: Sort by Type (Fused together)
-                                     elif sec_name == "Extra Deck":
-                                         # Custom Sort Order: Fusion (0), Synchro (1), Xyz (2), Link (3), Others (4)
-                                         def get_extra_sort_index(card):
-                                             c_type = db.get(card['name'], "").lower()
-                                             if "fusion" in c_type: return 0
-                                             if "synchro" in c_type: return 1
-                                             if "xyz" in c_type: return 2
-                                             if "link" in c_type: return 3
-                                             return 4
-                                         
-                                         # Sort in place
-                                         cards.sort(key=get_extra_sort_index)
-                                         
-                                         # Render Single Grid
-                                         st.markdown(f"##### {sec_name} ({len(cards)})")
-                                         cols = st.columns(8)
-                                         for i, card in enumerate(cards):
-                                             col_idx = i % 8
-                                             with cols[col_idx]:
-                                                 st.image(card['url'], use_container_width=True)
-                                     
-                                     # Fallback (Shouldn't trigger given above logic covers all standard names)
-                                     else:
-                                         st.markdown(f"##### {sec_name} ({len(cards)})")
-                                         cols = st.columns(8)
-                                         for i, card in enumerate(cards):
-                                              col_idx = i % 8
-                                              with cols[col_idx]:
-                                                  st.image(card['url'], use_container_width=True)
-                             
-                             # Fallback Text (Formatted for Print)
-                             with st.expander("📋 Copia Lista Testuale"):
-                                 # Logic to sort by Type (Monster/Spell/Trap) for Main Deck
-                                 # Load DB if needed
-                                 if "card_db" not in st.session_state:
-                                      st.session_state.card_db = load_card_database()
-                                 
-                                 db = st.session_state.card_db
-                                 
-                                 # Buckets
-                                 monsters = []
-                                 spells = []
-                                 traps = []
-                                 
-                                 for card in sections["Main Deck"]:
-                                     c_name = card["name"]
-                                     c_type = db.get(c_name, "Monster") # Default to Monster if unknown
-                                     
-                                     if "Spell" in c_type: spells.append(card)
-                                     elif "Trap" in c_type: traps.append(card)
-                                     else: monsters.append(card)
-                                 
-                                 # Build Clean Text
-                                 print_text = ""
-                                 
-                                 def format_section_list(card_list):
-                                      # Deduplicate by name and count
-                                      from collections import Counter
-                                      cnt = Counter([c['name'] for c in card_list])
-                                      lines = []
-                                      for name, count in cnt.items():
-                                          lines.append(f"{count}x {name}")
-                                      return "\n".join(lines)
-
-                                 if monsters:
-                                     print_text += "--- Monsters ---\n" + format_section_list(monsters) + "\n\n"
-                                 if spells:
-                                     print_text += "--- Spells ---\n" + format_section_list(spells) + "\n\n"
-                                 if traps:
-                                     print_text += "--- Traps ---\n" + format_section_list(traps) + "\n\n"
-                                 
-                                 if sections["Extra Deck"]:
-                                     print_text += "--- Extra Deck ---\n" + format_section_list(sections["Extra Deck"]) + "\n\n"
-                                 
-                                 if sections["Side Deck"]:
-                                     print_text += "--- Side Deck ---\n" + format_section_list(sections["Side Deck"]) + "\n"
-                                     
-                                 st.code(print_text, language="text")
-                                 
-                         else:
-                             st.warning("⚠️ Lista carte non disponibile.")
+                    else:
+                        st.info("Dettagli del mazzo non ancora scaricati. Riprova ad aggiornare.")
 
                         
 
