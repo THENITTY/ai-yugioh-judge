@@ -446,9 +446,16 @@ if mode == "👨‍⚖️ AI Judge":
         # Ricerca Universale (Autocomplete)
         st.subheader("1. Seleziona Carte")
         st.caption("Usa questo box per trovare i nomi ufficiali sicuri al 100%:")
+        
+        # Persistence Logic: Pre-fill if returning from Step 2
+        default_cards = st.session_state.get("detected_cards", [])
+        # Filter to ensure they are in options (safety check)
+        default_cards = [c for c in default_cards if c in all_card_names]
+        
         manual_selection = st.multiselect(
             "Carte Coinvolte:", 
             options=all_card_names,
+            default=default_cards,
             placeholder="Scrivi 'Ash Blossom', 'Nibiru'...",
             key="search_multiselect"
         )
@@ -456,6 +463,7 @@ if mode == "👨‍⚖️ AI Judge":
         st.subheader("2. Descrivi Scenario")
         question_input = st.text_area(
             "Domanda / Situazione:", 
+            value=st.session_state.get("question_text", ""),
             placeholder="Esempio: Se attivo 'Snatchy' su...", 
             height=150
         )
