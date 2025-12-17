@@ -1041,7 +1041,7 @@ elif mode == "📊 Meta Analyst":
 
                 # PROCESS BATCH
                 if remaining > 0:
-                    BATCH_SIZE = 5 # Safe chunk size
+                    BATCH_SIZE = 1 # Process one by one (User Request)
                     batch = st.session_state.batch_queue[:BATCH_SIZE]
                     st.session_state.batch_queue = st.session_state.batch_queue[BATCH_SIZE:] # Pop
                     
@@ -1547,7 +1547,8 @@ elif mode == "📊 Meta Analyst":
                                              st.image(card['url'], use_column_width=True)
                         
                         # Fallback Text (Formatted for Print)
-                        with st.expander("📋 Copia Lista Testuale"):
+                        st.markdown("#### 📋 Copia Lista Testuale")
+                        if True: # Removed nested expander
                             if "card_db" not in st.session_state:
                                  st.session_state.card_db = load_card_database()
                             db = st.session_state.card_db
