@@ -939,6 +939,25 @@ elif mode == "📊 Meta Analyst":
         # ==========================================
         if meta_source == "YGOProDeck (TCG)":
             
+            PROGRESS_FILE = "meta_scraping_progress.json"
+            
+            # --- PERSISTENCE: AUTO-LOADER (Survives App Restart/Crash) ---
+            if "batch_active" not in st.session_state:
+                if os.path.exists(PROGRESS_FILE):
+                    try:
+                        with open(PROGRESS_FILE, 'r') as f:
+                            saved_data = json.load(f)
+                        st.session_state.batch_queue = saved_data.get("queue", [])
+                        st.session_state.batch_results = saved_data.get("results", [])
+                        st.session_state.batch_logs = saved_data.get("logs", [])
+                        st.session_state.batch_total_count = saved_data.get("total", 0)
+                        st.session_state.batch_active = True
+                        st.toast(f"🔄 Sessione ripristinata dal disco: {len(st.session_state.batch_queue)} tornei rimanenti.")
+                    except Exception as e:
+                        st.error(f"Errore lettura salvataggio: {e}")
+                else:
+                    st.session_state.batch_active = False # Default
+
             # --- BATCH PROCESSING STATE INITIALIZATION ---
             if "batch_queue" not in st.session_state:
                 st.session_state.batch_queue = []
@@ -959,7 +978,7 @@ elif mode == "📊 Meta Analyst":
                             # 1. Discovery
                             scraper_tool = YuGiOhMetaScraper()
                             with st.status("🔍 Avvio Discovery...", expanded=True) as status:
-                                found_links = scraper_tool.get_ygoprodeck_tournaments(days_lookback=30) # Reduced to 30 for safety
+                                found_links = scraper_tool.get_ygoprodeck_tournaments(days_lookback=60) # Reduced to 30 for safety
                                 status.update(label=f"✅ Trovati {len(found_links)} tornei!", state="complete")
                             
                             if found_links:
@@ -971,13 +990,30 @@ elif mode == "📊 Meta Analyst":
                                     link = t_obj['url'] if isinstance(t_obj, dict) else t_obj
                                     if link not in urls_unique:
                                         urls_unique.add(link)
-                                        queue.append(t_obj)
+                                        # Serialization Helper: Convert datetime to ISO string instantly
+                                        if isinstance(t_obj, dict):
+                                            serializable_obj = t_obj.copy()
+                                            if "date" in serializable_obj and (isinstance(serializable_obj["date"], datetime) or isinstance(serializable_obj["date"], date)):
+                                                serializable_obj["date"] = serializable_obj["date"].isoformat()
+                                            queue.append(serializable_obj)
+                                        else:
+                                            queue.append({"url": link, "name": link}) # Fallback
                                 
                                 st.session_state.batch_queue = queue
                                 st.session_state.batch_total_count = len(queue)
                                 st.session_state.batch_results = [] # Clear previous
                                 st.session_state.batch_logs = ["✅ Discovery completata."]
                                 st.session_state.batch_active = True
+                                
+                                # SAVE TO DISK IMMEDIATELY
+                                with open(PROGRESS_FILE, 'w') as f:
+                                    json.dump({
+                                        "queue": st.session_state.batch_queue,
+                                        "results": [],
+                                        "logs": st.session_state.batch_logs,
+                                        "total": st.session_state.batch_total_count
+                                    }, f)
+
                                 st.rerun() # START THE LOOP
                             else:
                                 st.warning("⚠️ Nessun torneo trovato negli ultimi 30 giorni.")
@@ -996,9 +1032,11 @@ elif mode == "📊 Meta Analyst":
                 st.progress(progress, text=f"📥 Scaricamento Dati: {processed}/{total} tornei completati...")
                 
                 # STOP BUTTON
-                if st.button("⛔ Interrompi Scansione"):
+                if st.button("⛔ Interrompi e Cancella"):
                     st.session_state.batch_active = False
-                    st.warning("Scansione interrotta dall'utente.")
+                    if os.path.exists(PROGRESS_FILE):
+                         os.remove(PROGRESS_FILE)
+                    st.warning("Scansione annullata e file temporanei rimossi.")
                     st.rerun()
 
                 # PROCESS BATCH
@@ -1105,6 +1143,15 @@ elif mode == "📊 Meta Analyst":
                              # FORCE GC
                              gc.collect()
                              
+                             # SAVE PROGRESS TO DISK (CRITICAL PROTECTION)
+                             with open(PROGRESS_FILE, 'w') as f:
+                                    json.dump({
+                                        "queue": st.session_state.batch_queue,
+                                        "results": st.session_state.batch_results,
+                                        "logs": st.session_state.batch_logs,
+                                        "total": st.session_state.batch_total_count
+                                    }, f)
+                             
                         except Exception as e_batch:
                              st.session_state.batch_logs.append(f"❌ Errore critico nel blocco: {e_batch}")
                     
@@ -1156,6 +1203,8 @@ elif mode == "📊 Meta Analyst":
                          st.session_state.batch_active = False
                          st.session_state.batch_queue = []
                          st.session_state.batch_results = []
+                         if os.path.exists(PROGRESS_FILE):
+                             os.remove(PROGRESS_FILE)
                          st.rerun()
         
         # --- PERSISTENT DASHBOARD RENDERER (Runs on every reload) ---
