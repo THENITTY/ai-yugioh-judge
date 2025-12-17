@@ -297,6 +297,14 @@ def resolve_working_model():
             
     return genai.GenerativeModel("gemini-2.5-flash"), "gemini-2.5-flash (Default)"
 
+
+# --- UTILITY: Streamlit Compatibility Helper ---
+def render_responsive_image(image_url):
+    try:
+        st.image(image_url, use_container_width=True)
+    except TypeError:
+        st.image(image_url, use_column_width=True)
+
 # --- Gestione Autenticazione ---
 def load_keys():
     """Carica le chiavi da Streamlit Secrets (Cloud) o file JSON locale."""
@@ -1122,6 +1130,7 @@ elif mode == "📊 Meta Analyst":
                                                           place = raw_place if raw_place else f"Rank {r_i+1}"
                                                           
                                                       player = cells[1].get_text(strip=True)
+                                                      render_responsive_image(card['url'])
                                                       deck_name = deck_cell.get_text(strip=True)
                                                       
                                                       # Add to ThreadPool Tasks
@@ -1568,7 +1577,7 @@ elif mode == "📊 Meta Analyst":
                                     for i, card in enumerate(cards):
                                         col_idx = i % 8
                                         with cols[col_idx]:
-                                            st.image(card['url'], use_column_width=True)
+                                            render_responsive_image(card['url'])
                                 
                                 else:
                                     # Fallback
@@ -1576,7 +1585,7 @@ elif mode == "📊 Meta Analyst":
                                     cols = st.columns(8)
                                     for i, card in enumerate(cards):
                                          with cols[i % 8]:
-                                             st.image(card['url'], use_column_width=True)
+                                             render_responsive_image(card['url'])
                         
                         # Fallback Text (Formatted for Print)
                         st.markdown("#### 📋 Copia Lista Testuale")
