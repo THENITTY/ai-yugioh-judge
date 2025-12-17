@@ -163,6 +163,8 @@ class YuGiOhMetaScraper:
                         
                 browser.close()
             
+                browser.close()
+            
             return list(links)
         
         except Exception as e:

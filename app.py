@@ -1119,7 +1119,8 @@ elif mode == "📊 Meta Analyst":
                                     # 2. ESECUZIONE PARALLELA (Fetch Deck Lists)
                                     if tasks:
                                         status_text.markdown(f"**Analisi Torneo {u_idx + 1}/{total_urls_to_scrape}**: *{page_title}* - Analisi {len(tasks)} mazzi in corso...")
-                                        with ThreadPoolExecutor(max_workers=10) as executor:
+                                        # Reduced workers to prevent OOM on Cloud Free Tier
+                                        with ThreadPoolExecutor(max_workers=4) as executor:
                                             future_to_idx = {executor.submit(scrape_deck_list, t[1]): t[0] for t in tasks}
                                             
                                             for future in as_completed(future_to_idx):
