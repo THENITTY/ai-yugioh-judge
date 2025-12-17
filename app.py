@@ -54,6 +54,38 @@ def get_gemini_response(model, prompt):
             return f"Errore API Gemini: {e}"
     return "Errore: Rate limit persistente. Riprova più tardi."
 
+@st.cache_data
+def load_card_database():
+    """Scarica DB carte (Nome -> Tipo). Light version."""
+    try:
+        url = "https://db.ygoprodeck.com/api/v7/cardinfo.php"
+        # Timeout added to prevent freeze
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()["data"]
+            # Map: "Dark Magician" -> "Normal Monster"
+            db = {}
+            for card in data:
+                db[card["name"]] = card["type"]
+            return db
+        return {}
+    except Exception as e:
+        print(f"DB Load Error: {e}")
+        return {}
+
+@st.cache_data
+def load_all_card_names():
+    """Scarica e catch'a la lista di tutti i nomi delle carte (leggero)."""
+    try:
+        url = "https://db.ygoprodeck.com/api/v7/cardinfo.php"
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()["data"]
+            return [card["name"] for card in data]
+        return []
+    except Exception:
+        return []
+
 def extract_cards(model, user_question):
     prompt = f"""
     Sei un esperto di Yu-Gi-Oh!. Identifica le carte menzionate nella domanda.
@@ -344,18 +376,8 @@ if mode == "👨‍⚖️ AI Judge":
     model, active_model_name = resolve_working_model()
     st.sidebar.caption(f"🤖 Modello Judge: `{active_model_name}`")
 
-    @st.cache_data
-    def load_all_card_names():
-        """Scarica e cach'a la lista di tutti i nomi delle carte (leggero)."""
-        try:
-            url = "https://db.ygoprodeck.com/api/v7/cardinfo.php"
-            response = requests.get(url)
-            if response.status_code == 200:
-                data = response.json()["data"]
-                return [card["name"] for card in data]
-            return []
-        except Exception:
-            return []
+
+
 
     # Caricamento database carte (avviene una volta sola all'avvio)
     all_card_names = load_all_card_names()
@@ -911,21 +933,23 @@ elif mode == "📊 Meta Analyst":
         # Title is already at the top, just show the specific source info
         st.subheader(f"Fonte: {meta_source}")
         
+        
         # ==========================================
         # MODALITÀ: YGOProDeck (Principale)
         # ==========================================
         if meta_source == "YGOProDeck (TCG)":
-            # st.markdown("### Analisi Trend, Top Cut e Decklist") # Removed redundant subheader
-            
             if st.button("🔄 Aggiorna Database Meta (TCG)"):
                 with st.spinner("Scansiono il Web (Tornei Recenti)..."):
                     try:
                         # CONFIGURAZIONE
                         HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-                        aggregated_text = f"DATA ANALISI: {datetime.now().strftime('%d %B %Y')}\nFONTE: YGOProDeck\n\n"
-                        
+                        aggregated_text = f"DATA REPORT: {datetime.now().strftime('%d %B %Y')}\nFONTE: YGOProDeck (Recenti)\n\n"
                         urls_to_scrape = set()
                         scan_log = []
+                        all_processed_items_global = [] # GLOBAL ACCUMULATOR
+                        
+                        # BARRA DI PROGRESSO REALE
+                        progress_text = "Analisi Decklists in corso..."
                         
                         # 1. Discovery Automatica (Playwright)
                         st.toast("🤖 Avvio Browser per cercare tornei recenti...")
@@ -938,12 +962,25 @@ elif mode == "📊 Meta Analyst":
                             
                             if found_links:
                                 st.success(f"✅ Trovati {len(found_links)} tornei nel periodo!")
-                                for link in found_links:
+                                urls_metadata_map = {}
+                                
+                                for t_obj in found_links:
+                                    # Defensive Check: Handle both legacy str (URL) and new dict (Metadata)
+                                    if isinstance(t_obj, str):
+                                        link = t_obj
+                                        t_meta = {"name": link, "country": "Unknown"}
+                                    else:
+                                        link = t_obj['url']
+                                        t_meta = t_obj
+                                    
                                     if link not in urls_to_scrape:
                                         urls_to_scrape.add(link)
-                                        scan_log.append(f"🌍 Trovato: {link}")
+                                        urls_metadata_map[link] = t_meta
+                                        # Only show toast/log for new finds
+                                        scan_log.append(f"🌍 Trovato: {t_meta.get('name', link)}")
                             else:
                                 st.warning("⚠️ Nessun torneo trovato tramite Playwright. Provo fallback manuale...")
+                                urls_metadata_map = {}
                         
                         except Exception as e:
                             st.error(f"Errore Playwright: {e}")
@@ -976,7 +1013,16 @@ elif mode == "📊 Meta Analyst":
                                     for i, row in enumerate(rows):
                                         cells = row.find_all('span', class_='as-tablecell')
                                         if len(cells) >= 3:
-                                            place = cells[0].get_text(strip=True)
+                                            # RAW PLACE extraction (still used for top_cut check logic later)
+                                            raw_place_text = cells[0].get_text(strip=True)
+                                            
+                                            # LOGIC: Sequential Place Calculation (User Request)
+                                            # 0 -> 1st, 1 -> 2nd, 2 -> 3rd, etc.
+                                            rank_val = i + 1
+                                            if rank_val == 1: place = "1st Place"
+                                            elif rank_val == 2: place = "2nd Place"
+                                            elif rank_val == 3: place = "3rd Place" 
+                                            else: place = f"{rank_val}th Place"
                                             
                                             # Player
                                             player_span = cells[1].find('span', class_='player-name')
@@ -997,14 +1043,26 @@ elif mode == "📊 Meta Analyst":
                                                 link_tag = deck_cell.find('a')
                                                 if link_tag: deck_link = link_tag.get('href')
                                             
-                                            # Top Cut Check
-                                            is_top_cut = any(x in place.lower() for x in ["winner", "1st", "2nd", "top 4", "top 8"])
+                                            # Top Cut Check (using RAW text to match keywords like 'Winner', 'Top 4', etc.)
+                                            is_top_cut = any(x in raw_place_text.lower() for x in ["winner", "runner-up", "1st", "2nd", "top 4", "top 8", "top 16"])
                                             
+                                            # Retrieve Metadata
+                                            t_meta = urls_metadata_map.get(url, {})
+                                            country = t_meta.get("country", "Unknown")
+                                            etype = t_meta.get("type", "Other")
+                                            players_count = t_meta.get("players", 0)
+
                                             item = {
-                                                "place": place, "player": player, "deck_text": deck_text, "link": deck_link, "details": ""
+                                                "place": place, "player": player, "deck_text": deck_text, "link": deck_link, "details": "",
+                                                "event_source": page_title, # Added for AI Context
+                                                "country": country,
+                                                "event_type": etype,
+                                                "players": players_count
                                             }
                                             
-                                            if is_top_cut and deck_link and "deck/" in deck_link:
+                                            # Modified: Scrape ALL decks passed the check, regardless of place text
+                                            # User requested "tutte decklist con del contenuto"
+                                            if deck_link and "deck/" in deck_link:
                                                 tasks.append((i, deck_link))
                                             
                                             processed_items.append(item)
@@ -1024,22 +1082,72 @@ elif mode == "📊 Meta Analyst":
                                                 except Exception as exc:
                                                     pass
 
-                                    # 3. GENERAZIONE REPORT
-                                    for item in processed_items:
-                                        rows_data.append(f"- {item['place']}: {item['player']} -> {item['deck_text']}{item['details']}")
-
-                                if rows_data:
-                                    results_text = "\n".join(rows_data)
-                                    aggregated_text += f"\n=== REPORT: {page_title} ===\nURL: {url}\n{results_text}\n{'='*30}\n"
+                                    # 3. GENERAZIONE REPORT (per singolo URL, ma non per aggregated_text finale)
+                                    # This part is now only for scan_log, aggregated_text will be built globally later
                                     analyzed_count += 1
                                     scan_log.append(f"✅ Letto: {page_title}")
+                                    
+                                    # ACCUMULATE GLOBALLY
+                                    all_processed_items_global.extend(processed_items)
                                 
                             except Exception as e:
                                 scan_log.append(f"❌ Errore {url}: {e}")
 
                         # 4. Salvataggio
+                        # Generate aggregated_text from the global list after all scraping is done
+                        # STRUCTURE DATA FOR AI CONTEXT (Categorized by Event Type)
+                        premier_text = "=== 🏆 PREMIER EVENTS (YCS, WCQ, CHAMPIONSHIPS) ===\n"
+                        regional_text = "=== 🌍 REGIONAL / MAJOR EVENTS ===\n"
+                        other_text = "=== 🏠 LOCALS / OTHER ===\n"
+                        
+                        for item in all_processed_items_global:
+                            source = item.get('event_source', '').lower()
+                            entry = f"- {item['place']}: {item['player']} -> {item['deck_text']} (Event: {item['event_source']}){item['details']}\n"
+                            
+                            if "ycs" in source or "championship" in source or "wcq" in source:
+                                premier_text += entry
+                            elif "regional" in source or "major" in source:
+                                regional_text += entry
+                            else:
+                                other_text += entry
+                        
+                        aggregated_text += f"\n{premier_text}\n{regional_text}\n{other_text}"
+                        
                         st.session_state.meta_context = aggregated_text
                         st.session_state.meta_last_update = datetime.now().strftime("%H:%M")
+                        
+                        # PERSIST STRUCTURED DATA FOR DASHBOARD
+                        # PERSIST STRUCTURED DATA FOR DASHBOARD
+                        # Group by deck_text to get counts (FROM GLOBAL LIST)
+                        from collections import Counter
+                        # FIX: Filter out empty strings/whitespace
+                        all_decks_found = [item['deck_text'] for item in all_processed_items_global if item['deck_text'] and item['deck_text'].strip()]
+                        deck_counts = Counter(all_decks_found)
+                        
+                        structured_data = []
+                        for d_name, d_count in deck_counts.items():
+                            structured_data.append({"name": d_name, "count": d_count})
+                        
+                        st.session_state.meta_structured_data = structured_data
+                        
+                        # PERSIST DETAILED DATA FOR CONVERSION RATE
+                        # We need to know "Winner" count per deck
+                        detailed_list = []
+                        for item in all_processed_items_global:
+                            if item['deck_text'] and item['deck_text'].strip():
+                                detailed_list.append({"name": item['deck_text'], "place": item['place']})
+                        st.session_state.meta_detailed = detailed_list
+                        
+                        # PERSIST DETAILED DATA FOR CONVERSION RATE
+                        # We need to know "Winner" count per deck
+                        detailed_list = []
+                        for item in all_processed_items_global:
+                            if item['deck_text'] and item['deck_text'].strip():
+                                detailed_list.append({"name": item['deck_text'], "place": item['place']})
+                        st.session_state.meta_detailed = detailed_list
+                        
+                        # PERSIST RAW ITEMS FOR INSPECTOR
+                        st.session_state.meta_all_items_global = all_processed_items_global
                         
                         if analyzed_count > 0:
                             st.success(f"Analisi Completata! Importati {analyzed_count} report.")
@@ -1051,6 +1159,286 @@ elif mode == "📊 Meta Analyst":
 
                     except Exception as e:
                         st.error(f"Errore: {e}")
+        
+        # --- PERSISTENT DASHBOARD RENDERER (Runs on every reload) ---
+        if "meta_structured_data" in st.session_state and st.session_state.meta_structured_data:
+            st.divider()
+            st.subheader("📊 Analisi Dati Meta")
+            
+            structured_data = st.session_state.meta_structured_data
+            if not structured_data:
+                 st.warning("⚠️ Nessun dato utile trovato. Controlla i filtri.")
+            else:
+                 # 1. TOP 4 PERFORMING DECKS
+                 sorted_decks = sorted(structured_data, key=lambda x: x['count'], reverse=True)
+                 top_4 = sorted_decks[:4]
+                 
+                 col_top, col_conv = st.columns(2)
+                 
+                 with col_top:
+                     st.write("#### 🏆 Top 4 Mazzi (Per Numero di Top)")
+                     for i, d in enumerate(top_4):
+                         st.write(f"**#{i+1} {d['name']}** - {d['count']} Top")
+                         
+                 # 2. BEST CONVERSION (Top 6 Only)
+                 top_6_names = [d['name'] for d in sorted_decks[:6]]
+                 best_conversion_deck = None
+                 best_rate = -1.0
+                 conversion_stats = {}
+                 
+                 if "meta_detailed" in st.session_state:
+                     for item in st.session_state.meta_detailed:
+                         d_name = item['name']
+                         p_text = item['place'].lower()
+                         is_winner = "winner" in p_text or "1st" in p_text
+                         
+                         if d_name not in conversion_stats: conversion_stats[d_name] = {"wins": 0, "total": 0}
+                         conversion_stats[d_name]["total"] += 1
+                         if is_winner: conversion_stats[d_name]["wins"] += 1
+                 
+                 for d_name, stats in conversion_stats.items():
+                      if d_name in top_6_names: 
+                          if stats["total"] > 0:
+                              rate = stats["wins"] / stats["total"]
+                              if rate > best_rate:
+                                  best_rate = rate
+                                  best_conversion_deck = d_name
+                 
+                 with col_conv:
+                     st.write("#### 🎯 Best Converter (Tra i Top 6)")
+                     if best_conversion_deck:
+                         stats = conversion_stats[best_conversion_deck]
+                         pct = int(best_rate * 100)
+                         st.success(f"**{best_conversion_deck}**")
+                         st.caption(f"Ha vinto il **{pct}%** delle volte che ha fatto Top ({stats['wins']} Vittorie su {stats['total']} Top).")
+                     else:
+                         st.info("Nessun vincitore trovato tra i Top 6 mazzi.")
+
+                 st.divider()
+
+                 # --- INTERACTIVE DECK INSPECTOR ---
+                 st.subheader("🔍 Ispeziona Decklist")
+                 st.caption("Seleziona un giocatore/mazzo per vedere la lista completa.")
+                 
+                 all_items = st.session_state.get("meta_all_items_global", [])
+                 
+                 # --- FILTERS UI ---
+                 st.markdown("### 🌪️ Filtri Ispezione")
+                 f_col1, f_col2, f_col3 = st.columns(3)
+                 
+                 # 1. Extract Countries & Types
+                 all_countries = sorted(list(set([i.get('country', 'Unknown') for i in all_items])))
+                 all_types = sorted(list(set([i.get('event_type', 'Other') for i in all_items])))
+                 
+                 # Fix for potential 0 max_players causing Slider Error
+                 p_counts = [i.get('players', 0) for i in all_items]
+                 max_players = max(p_counts) if p_counts and max(p_counts) > 0 else 100
+                 
+                 with f_col1:
+                     sel_countries = st.multiselect("🌍 Paese", options=all_countries, default=[]) # Empty default = All
+                 with f_col2:
+                     sel_types = st.multiselect("🏆 Tipo Evento", options=all_types, default=[]) # Empty default = All
+                 with f_col3:
+                     min_p = st.slider("👥 Min. Players", 0, max_players, 0, step=10)
+                 
+                 # FILTER LOGIC
+                 filtered_items = []
+                 for item in all_items:
+                     # Logic: If list is empty, treat as "All Selected". Else, check existence.
+                     country_match = (not sel_countries) or (item.get('country', 'Unknown') in sel_countries)
+                     type_match = (not sel_types) or (item.get('event_type', 'Other') in sel_types)
+                     player_match = item.get('players', 0) >= min_p
+                     
+                     if country_match and type_match and player_match:
+                         filtered_items.append(item)
+                 
+                 st.caption(f"Mostrando {len(filtered_items)} su {len(all_items)} mazzi.")
+
+                 deck_map = {}
+                 for item in filtered_items:
+                     # Re-build label - USER REQUESTED FORMAT
+                     # "YCS Bologna (Italy) | 1st Place | Nome player | nome deck"
+                     event_name = item.get('event_source', 'Event').split(" - ")[0] # Try to clean up " - Yu-Gi-Oh!..." suffix if present
+                     place = item.get('place', 'N/A')
+                     country = item.get('country', 'Global')
+                     player = item.get('player', 'Unknown')
+                     deck = item.get('deck_text', 'Unknown Deck')
+                     
+                     # NEW FORMAT: Event | Country | Place | Player | Deck
+                     label = f"{event_name} | {country} | {place} | {player} | {deck}"
+                     deck_map[label] = item
+                 
+                 selected_label = st.selectbox("Scegli Decklist:", options=list(deck_map.keys()), index=None, placeholder="Cerca un mazzo...")
+                 
+                 if selected_label:
+                     item = deck_map[selected_label]
+                     with st.expander(f"📂 Lista Carte: {item['deck_text']} ({item['player']})", expanded=False):
+                         col_head1, col_head2 = st.columns([3, 1])
+                         col_head1.markdown(f"**Evento:** {item.get('event_source', 'N/A')}")
+                         col_head2.markdown(f"[🔗 Apri su YGOProDeck]({item['link']})")
+                         
+                         if item['details']:
+                             # PARSE & VISUALIZE DECK
+                             import re
+                             
+                             raw_text = item['details'].replace("[DETTAGLIO DECK]", "").strip()
+                             
+                             # Regex to find: "3x Name <URL>"
+                             # Logic: Split by sections first
+                             sections = {"Main Deck": [], "Extra Deck": [], "Side Deck": []}
+                             current_section = "Main Deck"
+                             
+                             # Clean text lines
+                             lines = raw_text.split('\n')
+                             for line in lines:
+                                 line = line.strip()
+                                 if not line: continue
+                                 
+                                 # Detect Section Headers
+                                 if "**Main Deck**" in line: 
+                                     current_section = "Main Deck"
+                                     continue
+                                 elif "**Extra Deck**" in line: 
+                                     current_section = "Extra Deck"
+                                     continue
+                                 elif "**Side Deck**" in line: 
+                                     current_section = "Side Deck"
+                                     continue
+                                 
+                                 # Regex for individual card tokens
+                                 matches = re.findall(r"(\d+)x\s(.*?)\s<(https?://[^>]+)>", line)
+                                 for count, name, url in matches:
+                                     try:
+                                         cnt = int(count)
+                                         # Multiply images by count for grid view
+                                         for _ in range(cnt):
+                                             sections[current_section].append({"name": name, "url": url})
+                                     except:
+                                         pass
+                             
+                             # RENDER GRID
+                             
+                             # Ensure DB is loaded for sorting
+                             if "card_db" not in st.session_state:
+                                  st.session_state.card_db = load_card_database()
+                             db = st.session_state.card_db
+
+                             for sec_name, cards in sections.items():
+                                 if cards:
+                                     
+                                     # A. SORTING LOGIC PER SECTION
+                                     
+                                     # 1. MAIN DECK & SIDE DECK: Split by Type
+                                     if sec_name in ["Main Deck", "Side Deck"]:
+                                         monsters = []
+                                         spells = []
+                                         traps = []
+                                         
+                                         for card in cards:
+                                             c_type = db.get(card['name'], "Monster") # Default to Monster
+                                             if "Spell" in c_type: spells.append(card)
+                                             elif "Trap" in c_type: traps.append(card)
+                                             else: monsters.append(card)
+                                         
+                                         # Render Sub-grids with Headers
+                                         sub_sections = [("Mostri", monsters), ("Magie", spells), ("Trappole", traps)]
+                                         
+                                         st.markdown(f"##### {sec_name} ({len(cards)})")
+                                         for sub_name, sub_cards in sub_sections:
+                                             if sub_cards:
+                                                 st.markdown(f"**{sub_name}** ({len(sub_cards)})")
+                                                 cols = st.columns(8)
+                                                 for i, card in enumerate(sub_cards):
+                                                     col_idx = i % 8
+                                                     with cols[col_idx]:
+                                                         st.image(card['url'], use_container_width=True)
+                                     
+                                     # 2. EXTRA DECK: Sort by Type (Fused together)
+                                     elif sec_name == "Extra Deck":
+                                         # Custom Sort Order: Fusion (0), Synchro (1), Xyz (2), Link (3), Others (4)
+                                         def get_extra_sort_index(card):
+                                             c_type = db.get(card['name'], "").lower()
+                                             if "fusion" in c_type: return 0
+                                             if "synchro" in c_type: return 1
+                                             if "xyz" in c_type: return 2
+                                             if "link" in c_type: return 3
+                                             return 4
+                                         
+                                         # Sort in place
+                                         cards.sort(key=get_extra_sort_index)
+                                         
+                                         # Render Single Grid
+                                         st.markdown(f"##### {sec_name} ({len(cards)})")
+                                         cols = st.columns(8)
+                                         for i, card in enumerate(cards):
+                                             col_idx = i % 8
+                                             with cols[col_idx]:
+                                                 st.image(card['url'], use_container_width=True)
+                                     
+                                     # Fallback (Shouldn't trigger given above logic covers all standard names)
+                                     else:
+                                         st.markdown(f"##### {sec_name} ({len(cards)})")
+                                         cols = st.columns(8)
+                                         for i, card in enumerate(cards):
+                                              col_idx = i % 8
+                                              with cols[col_idx]:
+                                                  st.image(card['url'], use_container_width=True)
+                             
+                             # Fallback Text (Formatted for Print)
+                             with st.expander("📋 Copia Lista Testuale"):
+                                 # Logic to sort by Type (Monster/Spell/Trap) for Main Deck
+                                 # Load DB if needed
+                                 if "card_db" not in st.session_state:
+                                      st.session_state.card_db = load_card_database()
+                                 
+                                 db = st.session_state.card_db
+                                 
+                                 # Buckets
+                                 monsters = []
+                                 spells = []
+                                 traps = []
+                                 
+                                 for card in sections["Main Deck"]:
+                                     c_name = card["name"]
+                                     c_type = db.get(c_name, "Monster") # Default to Monster if unknown
+                                     
+                                     if "Spell" in c_type: spells.append(card)
+                                     elif "Trap" in c_type: traps.append(card)
+                                     else: monsters.append(card)
+                                 
+                                 # Build Clean Text
+                                 print_text = ""
+                                 
+                                 def format_section_list(card_list):
+                                      # Deduplicate by name and count
+                                      from collections import Counter
+                                      cnt = Counter([c['name'] for c in card_list])
+                                      lines = []
+                                      for name, count in cnt.items():
+                                          lines.append(f"{count}x {name}")
+                                      return "\n".join(lines)
+
+                                 if monsters:
+                                     print_text += "--- Monsters ---\n" + format_section_list(monsters) + "\n\n"
+                                 if spells:
+                                     print_text += "--- Spells ---\n" + format_section_list(spells) + "\n\n"
+                                 if traps:
+                                     print_text += "--- Traps ---\n" + format_section_list(traps) + "\n\n"
+                                 
+                                 if sections["Extra Deck"]:
+                                     print_text += "--- Extra Deck ---\n" + format_section_list(sections["Extra Deck"]) + "\n\n"
+                                 
+                                 if sections["Side Deck"]:
+                                     print_text += "--- Side Deck ---\n" + format_section_list(sections["Side Deck"]) + "\n"
+                                     
+                                 st.code(print_text, language="text")
+                                 
+                         else:
+                             st.warning("⚠️ Lista carte non disponibile.")
+
+                        
+
+
 
         # ==========================================
         # MODALITÀ: YuGiOhMeta (Sperimentale)
@@ -1092,6 +1480,19 @@ elif mode == "📊 Meta Analyst":
                         aggregated_text += f"=== SIDE DECK STAPLES ===\n{str(data['side'])}\n"
                         st.session_state.meta_context = aggregated_text
                         st.session_state.meta_last_update = datetime.now().strftime("%H:%M")
+                        
+                        # PERSIST STRUCTURED DATA
+                        # data["decks"] is already [{'name': 'X', 'count': N, 'percent': P}]
+                        # Normalize keys: 'name', 'count' (ensure int)
+                        structured_data = []
+                        for d in data["decks"]:
+                             try:
+                                 c = int(d['count'])
+                             except:
+                                 c = 0
+                             structured_data.append({"name": d['name'], "count": c})
+                        st.session_state.meta_structured_data = structured_data
+                        
                         st.success("🧠 Dati inviati all'AI! Ora chiedi pure.")
 
             # --- MODE 2: TECH DEEP DIVE (NEW) ---
@@ -1230,6 +1631,20 @@ elif mode == "📊 Meta Analyst":
                                     
                                     st.session_state.meta_context = aggregated_text
                                     st.session_state.meta_last_update = datetime.now().strftime("%H:%M")
+                                    
+                                    # PERSIST STRUCTURED DATA
+                                    # all_decks_data contains raw deck dicts
+                                    # We need to extract deckType name and count
+                                    from collections import Counter
+                                    deck_names = []
+                                    for d in all_decks_data:
+                                         d_name = d.get("deckType", {}).get("name", "Unknown Deck")
+                                         deck_names.append(d_name)
+                                    
+                                    cnt = Counter(deck_names)
+                                    structured_data = [{"name": k, "count": v} for k, v in cnt.items()]
+                                    st.session_state.meta_structured_data = structured_data
+                                    
                                     status.update(label="Scraping Multiplo Completato!", state="complete", expanded=False)
                                     st.success("✅ Database Meta Aggiornato con successo!")
                                 else:
@@ -1337,6 +1752,9 @@ elif mode == "📊 Meta Analyst":
         else:
             # 3. AI Generation
             with st.chat_message("assistant"):
+                placeholder = st.empty()
+                placeholder.markdown("⏳ *Analisi strategica in corso...*")
+                
                 meta_model, _ = resolve_working_model()
                 
                 # Construct History Text for Prompt
@@ -1373,7 +1791,7 @@ elif mode == "📊 Meta Analyst":
                 
                 # Stream Response
                 full_response = ""
-                placeholder = st.empty()
+                # placeholder is already created above
                 try:
                     stream = meta_model.generate_content(prompt_rag, stream=True)
                     for chunk in stream:

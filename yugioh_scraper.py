@@ -202,10 +202,10 @@ class YuGiOhMetaScraper:
             print(f"Playwright Error: {e}")
             return []
 
-    def get_ygoprodeck_tournaments(self, days_lookback=60):
+    def get_ygoprodeck_tournaments(self, days_lookback=30):
         """
         Uses Playwright to scrape YGOProDeck Tournaments page.
-        Filters by date (default last 60 days).
+        Filters by date (default last 30 days).
         Returns list of full tournament URLs.
         """
         from playwright.sync_api import sync_playwright
@@ -229,8 +229,7 @@ class YuGiOhMetaScraper:
                 page.goto("https://ygoprodeck.com/tournaments/", timeout=60000)
                 
                 # Loop through desired tiers
-                # User requested Tier 2 and Tier 3. 
-                # value: Label
+                # User definition: Tier 3 = Premier (YCS), Tier 2 = Competitive
                 TARGET_TIERS = {"2": "Competitive", "3": "Premier"}
                 
                 seen = set() # Initialize seen set here to accumulate across tiers
@@ -242,7 +241,7 @@ class YuGiOhMetaScraper:
                     "Japan", "Korea", "China", "Philippines", "Thailand", "Singapore", "Malaysia", "Taiwan", "Vietnam"
                 ]
                 
-                MIN_PLAYERS = 80
+                MIN_PLAYERS = 80 # Reverted to strict 80+ players
 
                 for tier_val, tier_label in TARGET_TIERS.items():
                     print(f"DEBUG: Scraping Tier '{tier_label}' (Value: {tier_val})...")
@@ -297,23 +296,50 @@ class YuGiOhMetaScraper:
                             if not href or "/tournament/" not in href or href in seen:
                                 continue
                             
-                            # Validates Text & Player Count
+                            # Validates Text & Player Count & Country
                             row_data = a.evaluate("""
                                 el => {
                                     const tr = el.closest('tr');
-                                    if (!tr) return { text: el.innerText, players: 0 };
+                                    // Default return if no row found
+                                    if (!tr) return { text: el.innerText, players: "0", country: "Global", name_raw: "Unknown" };
+                                    
                                     const cells = tr.querySelectorAll('td');
-                                    // Column 3 (0-indexed) is # Players
+                                    // 0: Date, 1: Country, 2: Name, 3: Players, 4: Winner
+                                    
+                                    // 1. Players (Col 3)
                                     const playerText = cells[3] ? cells[3].innerText : "0";
+                                    
+                                    // 2. Country (Col 1)
+                                    let countryText = "Global";
+                                    if(cells[1]) {
+                                        countryText = cells[1].innerText.trim();
+                                        if(!countryText) {
+                                            const img = cells[1].querySelector('img');
+                                            if(img && img.alt) countryText = img.alt;
+                                        }
+                                    }
+
+                                    // 3. Name (Col 2)
+                                    let nameText = "Unknown Tournament";
+                                    if(cells[2]) {
+                                        nameText = cells[2].innerText.trim();
+                                        nameText = nameText.split(" - Yu-Gi-Oh!")[0]; // Cleanup
+                                    }
+
                                     return { 
                                         text: tr.innerText, 
-                                        players: playerText 
+                                        players: playerText,
+                                        country: countryText || "Global",
+                                        name_raw: nameText
                                     };
                                 }
                             """)
                             
                             row_text = row_data["text"]
                             player_raw = row_data["players"]
+                            raw_country = row_data["country"]
+                            # Use the explicitly scraped name
+                            name = row_data["name_raw"]
                             
                             # Blacklist Check
                             if any(bad_word.lower() in row_text.lower() for bad_word in BLACKLIST_KEYWORDS):
@@ -327,6 +353,7 @@ class YuGiOhMetaScraper:
                                     continue
                             except:
                                 if "Unknown" not in player_raw: continue
+                                players_count = 0
 
                             # Date Check
                             match = regex_date.search(row_text)
@@ -334,14 +361,50 @@ class YuGiOhMetaScraper:
                                 date_str = match.group(1)
                                 try:
                                     # Parse "Dec 14, 2025"
-                                    # Note: YGOProDeck format is "Dec 14, 2025"
                                     row_date = datetime.strptime(date_str, "%b %d, %Y")
                                     if row_date >= threshold_date:
                                         # Normalize URL
                                         if href.startswith("/"):
                                             href = "https://ygoprodeck.com" + href
-                                        links.append(href)
-                                        seen.add(href)
+                                        
+                                        # HEATURISTIC EXTRACTION REMOVED -> Used Explicit 'name' variable above
+                                        
+                                        # Event Type
+                                        etype = "Other"
+                                        # Order matters: Specific -> Generic
+                                        if "YCS" in name: etype = "YCS"
+                                        elif "WCQ" in name: etype = "WCQ"
+                                        elif "National" in name: etype = "National"
+                                        elif "Championship" in name: etype = "Championship" 
+                                        elif "Regional" in name: etype = "Regional"
+                                        elif "OTS" in name: etype = "OTS"
+                                        elif "Case" in name: etype = "Case Tournament"
+                                        elif "Open" in name: etype = "Open"
+                                        elif "Grand" in name: etype = "Grand Open"
+                                        elif "Qualifier" in name: etype = "Qualifier"
+                                        elif "Celebration" in name: etype = "Celebration Event"
+                                        elif "Team" in name: etype = "Team Tournament"
+                                        elif "LLDS" in name: etype = "LLDS"
+                                        elif "Master" in name: etype = "Master Duel" # Catch-all for stray master duel if not blacklisted
+                                        
+                                        # Use Scraped Country
+                                        country = raw_country
+                                            
+                                        # Create Object
+                                        t_obj = {
+                                            "url": href,
+                                            "name": name,
+                                            "date": row_date,
+                                            "date_str": date_str,
+                                            "players": players_count,
+                                            "type": etype,
+                                            "country": country
+                                        }
+                                        
+                                        # Avoid Duplicates based on URL
+                                        if href not in seen:
+                                            links.append(t_obj)
+                                            seen.add(href)
                                 except: pass
                                 
                     except Exception as e:
