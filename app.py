@@ -391,7 +391,7 @@ mode = st.sidebar.radio("Seleziona App:", ["👨‍⚖️ AI Judge", "📊 Meta 
 
 # --- UI Principale ---
 if mode == "👨‍⚖️ AI Judge":
-    st.title("AI Yu-Gi-Oh! Judge ⚡️")
+    st.title("AI Yu-Gi-Oh! Judge ⚖️")
     st.markdown("### Il tuo assistente per i ruling complessi")
 
     # Inizializza modello standard per Judge
@@ -439,19 +439,15 @@ if mode == "👨‍⚖️ AI Judge":
         st.rerun()
 
     # --- STEP 1: Input Domanda ---
+    # --- STEP 1: Input Domanda ---
     if st.session_state.step == 1:
-        with st.expander("ℹ️ Come funziona?"):
-            st.write("""
-            1. Scrivi lo scenario OPPURE cerca direttamente le carte.
-            2. Seleziona le carte coinvolte.
-            3. Ricevi un verdetto rapido e tecnico.
-            """)
+        # (Expander Removed as requested)
             
         # Ricerca Universale (Autocomplete)
-        st.subheader("1. Cerca Carte (Opzionale)")
+        st.subheader("1. Seleziona Carte")
         st.caption("Usa questo box per trovare i nomi ufficiali sicuri al 100%:")
         manual_selection = st.multiselect(
-            "Aggiungi carte alla busta:", 
+            "Carte Coinvolte:", 
             options=all_card_names,
             placeholder="Scrivi 'Ash Blossom', 'Nibiru'...",
             key="search_multiselect"
@@ -459,32 +455,22 @@ if mode == "👨‍⚖️ AI Judge":
 
         st.subheader("2. Descrivi Scenario")
         question_input = st.text_area(
-            "Descrivi cosa sta succedendo (usa anche nickname):", 
+            "Domanda / Situazione:", 
             placeholder="Esempio: Se attivo 'Snatchy' su...", 
             height=150
         )
         
         # --- NEW: Image Upload ---
-        st.subheader("3. Analisi Foto Campo 📸 (BETA)")
+        st.subheader("3. Analisi Foto Campo 📸")
         uploaded_file = st.file_uploader("Carica una foto del terreno di gioco:", type=["jpg", "jpeg", "png"])
         
-        col_btn1, col_btn2 = st.columns(2)
+        st.divider()
         
-        with col_btn1:
-            if st.button("Analizza Scenario (Testo) 🔍", type="primary"):
-                if not manual_selection and not question_input:
-                     st.warning("Scrivi qualcosa o seleziona una carta.")
-                else:
-                     st.session_state.question_text = question_input
-                     # Se c'è testo ma no selezione manuale, prova a estrarre dal testo? 
-                     # Semplifichiamo: Manuale ha priorità.
-                     st.session_state.detected_cards = list(set(manual_selection))
-                     st.session_state.step = 2
-                     st.rerun()
-
-        with col_btn2:
-            if uploaded_file is not None:
-                if st.button("Analizza FOTO + Testo 🧠📸"):
+        # Consolidated Action Button Area
+        # Logic: If photo -> Button "Vision", Else -> Button "Text"
+        if uploaded_file is not None:
+             # Photo Uploaded -> Priority Action is Vision
+             if st.button("📸 Analizza Foto + Scenario", type="primary", use_container_width=True):
                     with st.spinner("👀 L'AI sta guardando la foto..."):
                          try:
                              image = Image.open(uploaded_file)
@@ -496,6 +482,7 @@ if mode == "👨‍⚖️ AI Judge":
                              
                              vision_cards = []
                              situation_desc = ""
+
                              
                              # Check for errors/raw text first
                              if isinstance(vision_data, dict):
@@ -545,6 +532,17 @@ if mode == "👨‍⚖️ AI Judge":
                              
                          except Exception as e:
                              st.error(f"Errore caricamento immagine: {e}")
+                             
+        else:
+             # Text Only Mode
+             if st.button("Analizza Scenario (Testo) 🔍", type="primary", use_container_width=True):
+                if not manual_selection and not question_input:
+                     st.warning("Scrivi qualcosa o seleziona una carta.")
+                else:
+                     st.session_state.question_text = question_input
+                     st.session_state.detected_cards = list(set(manual_selection))
+                     st.session_state.step = 2
+                     st.rerun()
 
     # --- STEP 2: Verifica Carte ---
     elif st.session_state.step == 2:
