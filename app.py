@@ -1516,7 +1516,7 @@ elif mode == "📊 Meta Analyst":
                                             for i, card in enumerate(sub_cards):
                                                 col_idx = i % 8
                                                 with cols[col_idx]:
-                                                    st.image(card['url'], use_container_width=True)
+                                                    st.image(card['url'], use_column_width=True)
                                 
                                 # 2. EXTRA DECK: Sort by Type (Fused together)
                                 elif sec_name == "Extra Deck":
@@ -1536,7 +1536,7 @@ elif mode == "📊 Meta Analyst":
                                     for i, card in enumerate(cards):
                                         col_idx = i % 8
                                         with cols[col_idx]:
-                                            st.image(card['url'], use_container_width=True)
+                                            st.image(card['url'], use_column_width=True)
                                 
                                 else:
                                     # Fallback
@@ -1544,7 +1544,7 @@ elif mode == "📊 Meta Analyst":
                                     cols = st.columns(8)
                                     for i, card in enumerate(cards):
                                          with cols[i % 8]:
-                                             st.image(card['url'], use_container_width=True)
+                                             st.image(card['url'], use_column_width=True)
                         
                         # Fallback Text (Formatted for Print)
                         with st.expander("📋 Copia Lista Testuale"):
