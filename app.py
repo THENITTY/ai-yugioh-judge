@@ -237,14 +237,18 @@ def scrape_deck_list(deck_url):
 
                     for name, count in counts.most_common():
                         url = card_map.get(name, "")
-                        # Salviamo nel contesto in formato: "3x Name <URL>" così l'LLM lo può parsare
-                        card_lines.append(f"{count}x {name} <{url}>")
+                        # Salviamo nel contesto in formato: "3x Name <URL>" (per riga)
+                        if url:
+                             card_lines.append(f"{count}x {name} <{url}>")
+                        else:
+                             card_lines.append(f"{count}x {name}")
                         
                         # Populate structured raw data
                         structured_list.append({"amount": count, "card": {"name": name, "image": url}})
 
                     deck_text.append(f"**{section_name}**:")
-                    deck_text.append(", ".join(card_lines))
+
+                    deck_text.append("\n".join(card_lines))
                     
                     # Save to specific raw lists
                     if section_id == "main_deck":
@@ -1476,8 +1480,12 @@ elif mode == "📊 Meta Analyst":
                             elif "**Side Deck**" in line: 
                                 current_section = "Side Deck"; continue
                             
-                            matches = re.findall(r"(\d+)x\s(.*?)\s<(https?://[^>]+)>", line)
+                            # Regex robusta: Cerca "Nx Nome" opzionalmente seguito da "<URL>"
+                            # Matches lines like: "3x Ash Blossom" OR "3x Ash Blossom <http...>"
+                            matches = re.findall(r"(\d+)x\s(.*?)(?:\s<(https?://[^>]+)>)?$", line)
+                            
                             for count, name, url in matches:
+                                name = name.strip() # Clean punctuation if any
                                 try:
                                     cnt = int(count)
                                     # Multiply images by count for grid view
