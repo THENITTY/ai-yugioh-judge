@@ -561,6 +561,26 @@ if mode == "👨‍⚖️ AI Judge":
         st.divider()
         st.subheader("🛠 Busta Carte")
         
+        # --- CALLBACK LOGIC START ---
+        def add_cards_callback():
+            """Adds selected cards to the main list and clears the widget."""
+            new_selection = st.session_state.step2_multiselect
+            current_cards = st.session_state.detected_cards
+            
+            # Add unique new cards
+            for card in new_selection:
+                if card not in current_cards:
+                    current_cards.append(card)
+                    # Optional: Toast feedback
+                    # st.toast(f"Aggiunto: {card}")
+            
+            # Update main list
+            st.session_state.detected_cards = current_cards
+            # Clear the widget
+            st.session_state.step2_multiselect = []
+
+        # --- CALLBACK LOGIC END ---
+        
         final_cards_list = []
         
         for i, card in enumerate(st.session_state.detected_cards):
@@ -572,12 +592,23 @@ if mode == "👨‍⚖️ AI Judge":
                 else:
                     st.write("🖼️")
             with col_input:
+               # Note: We update the list 'live' based on text input changes? 
+               # For now, we trust the final "Confirm" button to gather these inputs.
+               # BUT: If we change the card name here, it should ideally update the session state too?
+               # Let's keep the existing logic where "final_cards_list" gathers the valid text inputs.
                new_name = st.text_input(f"Carta #{i+1}", value=card, key=f"card_{i}", label_visibility="collapsed")
                if new_name.strip():
                    final_cards_list.append(new_name)
+               
+               # Add a "Remove" button per card? (Out of scope for now, but good for future)
 
-        # Full width for multiselect (Cleaner)
-        extra_add = st.multiselect("Aggiungi altre carte:", options=all_card_names, key="step2_multiselect")
+        # Dynamic Add Box
+        st.multiselect(
+            "Aggiungi altre carte (si sposteranno sopra dopo l'invio):", 
+            options=all_card_names, 
+            key="step2_multiselect",
+            on_change=add_cards_callback  # This triggers the "Action"
+        )
         
         st.divider()
         
@@ -590,8 +621,8 @@ if mode == "👨‍⚖️ AI Judge":
                 
         with col_confirm:
             if st.button("Conferma e Giudica 👨‍⚖️", type="primary", use_container_width=True):
-                full_list = final_cards_list + extra_add
-                clean_list = list(set([c.strip() for c in full_list if c.strip()]))
+                # Now we just need to save the edits from the text inputs
+                clean_list = list(set([c.strip() for c in final_cards_list if c.strip()]))
                 st.session_state.detected_cards = clean_list
                 st.session_state.step = 3
                 st.rerun()
