@@ -1096,7 +1096,31 @@ elif mode == "📊 Meta Analyst":
                                                       # Store Task: (TournamentMeta, DeckLink, Place/Player info needed?)
                                                       # We need full info.
                                                       # Let's extract basic info quickly
-                                                      place = cells[0].get_text(strip=True)
+                                                      raw_place = cells[0].get_text(strip=True)
+                                                      
+                                                      # INFERRED PLACEMENT LOGIC (Count-based)
+                                                      # YGOProDeck creates tables sorted by rank.
+                                                      # r_i = 0 -> Winner
+                                                      # r_i = 1 -> Runner-Up (Finalist)
+                                                      # r_i = 2,3 -> Top 4
+                                                      # r_i = 4..7 -> Top 8
+                                                      # r_i = 8..15 -> Top 16
+                                                      
+                                                      if r_i == 0: 
+                                                          place = "🥇 Winner"
+                                                      elif r_i == 1:
+                                                          place = "🥈 Finalist"
+                                                      elif r_i < 4:
+                                                          place = "Top 4"
+                                                      elif r_i < 8:
+                                                          place = "Top 8"
+                                                      elif r_i < 16:
+                                                          place = "Top 16"
+                                                      elif r_i < 32:
+                                                          place = "Top 32"
+                                                      else:
+                                                          place = raw_place if raw_place else f"Rank {r_i+1}"
+                                                          
                                                       player = cells[1].get_text(strip=True)
                                                       deck_name = deck_cell.get_text(strip=True)
                                                       
