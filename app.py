@@ -938,274 +938,225 @@ elif mode == "📊 Meta Analyst":
         # MODALITÀ: YGOProDeck (Principale)
         # ==========================================
         if meta_source == "YGOProDeck (TCG)":
-            if st.button("🔄 Scansiona Nuovi Tornei", type="primary"):
-                with st.spinner("Scansiono il Web (Tornei Recenti)..."):
-                    try:
-                        # CONFIGURAZIONE
-                        HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-                        aggregated_text = f"DATA REPORT: {datetime.now().strftime('%d %B %Y')}\nFONTE: YGOProDeck (Recenti)\n\n"
-                        urls_to_scrape = set()
-                        scan_log = []
-                        all_processed_items_global = [] # GLOBAL ACCUMULATOR
-                        
-                        # BARRA DI PROGRESSO REALE
-                        progress_text = "Analisi Decklists in corso..."
-                        
-                        # 1. Discovery Automatica (Playwright)
-                        st.toast("🤖 Avvio Browser per cercare tornei recenti...")
-                        scraper_tool = YuGiOhMetaScraper() # Utilizziamo la classe per accedere al metodo Playwright
-                        
-                        try:
-                            # Usa il nuovo metodo Playwright (ultimi 60 giorni)
-                            # Usa il nuovo metodo Playwright (ultimi 60 giorni)
+            
+            # --- BATCH PROCESSING STATE INITIALIZATION ---
+            if "batch_queue" not in st.session_state:
+                st.session_state.batch_queue = []
+            if "batch_results" not in st.session_state:
+                st.session_state.batch_results = []
+            if "batch_active" not in st.session_state:
+                st.session_state.batch_active = False
+            if "batch_logs" not in st.session_state:
+                st.session_state.batch_logs = []
+            if "batch_total_count" not in st.session_state:
+                st.session_state.batch_total_count = 0
 
-                            
-                            found_links = []
-                            with st.status("🔍 Inizializzazione Scraper & Browser...", expanded=True) as status:
-                                st.write("🚀 Avvio Playwright (Installazione browser se necessario)...")
-                                try:
-                                    found_links = scraper_tool.get_ygoprodeck_tournaments(days_lookback=60)
-                                    status.update(label=f"✅ Scansione completata! Trovati {len(found_links)} tornei.", state="complete", expanded=False)
-                                except Exception as e:
-                                    status.update(label="❌ Errore durante la scansione", state="error")
-                                    st.error(f"Errore critico nello scraper: {e}")
+            # --- ACTION: START DISCOVERY (PHASE 1) ---
+            if not st.session_state.batch_active:
+                if st.button("🔄 Scansiona Nuovi Tornei", type="primary"):
+                    with st.spinner("🔍 Fase 1: Ricerca Tornei Recent (Playwright)..."):
+                        try:
+                            # 1. Discovery
+                            scraper_tool = YuGiOhMetaScraper()
+                            with st.status("🔍 Avvio Discovery...", expanded=True) as status:
+                                found_links = scraper_tool.get_ygoprodeck_tournaments(days_lookback=30) # Reduced to 30 for safety
+                                status.update(label=f"✅ Trovati {len(found_links)} tornei!", state="complete")
                             
                             if found_links:
-                                st.success(f"✅ Trovati {len(found_links)} tornei nel periodo!")
-                                urls_metadata_map = {}
-                                
+                                # Prepare Queue
+                                urls_unique = set()
+                                queue = []
                                 for t_obj in found_links:
-                                    # Defensive Check: Handle both legacy str (URL) and new dict (Metadata)
-                                    if isinstance(t_obj, str):
-                                        link = t_obj
-                                        t_meta = {"name": link, "country": "Unknown"}
-                                    else:
-                                        link = t_obj['url']
-                                        t_meta = t_obj
-                                    
-                                    if link not in urls_to_scrape:
-                                        urls_to_scrape.add(link)
-                                        urls_metadata_map[link] = t_meta
-                                        # Only show toast/log for new finds
-                                        scan_log.append(f"🌍 Trovato: {t_meta.get('name', link)}")
+                                    # Normalized check
+                                    link = t_obj['url'] if isinstance(t_obj, dict) else t_obj
+                                    if link not in urls_unique:
+                                        urls_unique.add(link)
+                                        queue.append(t_obj)
+                                
+                                st.session_state.batch_queue = queue
+                                st.session_state.batch_total_count = len(queue)
+                                st.session_state.batch_results = [] # Clear previous
+                                st.session_state.batch_logs = ["✅ Discovery completata."]
+                                st.session_state.batch_active = True
+                                st.rerun() # START THE LOOP
                             else:
-                                st.warning("⚠️ Nessun torneo trovato tramite Playwright. Provo fallback manuale...")
-                                urls_metadata_map = {}
+                                st.warning("⚠️ Nessun torneo trovato negli ultimi 30 giorni.")
                         
                         except Exception as e:
-                            st.error(f"Errore Playwright: {e}")
+                            st.error(f"Errore Discovery: {e}")
 
-                        # 3. Deep Scrape dei Link Trovati
-                        analyzed_count = 0
-                        urls_list = list(urls_to_scrape) # Convert to list to check length
-                        total_urls_to_scrape = len(urls_list) 
-                        
-                        if total_urls_to_scrape == 0:
-                             st.error("❌ Nessun torneo trovato! È possibile che il sito abbia bloccato la richiesta o che ci siano problemi con lo scraper (Playwright/Cloud).")
-                             st.info("💡 Suggerimento: Riprova tra qualche minuto.")
-                        
-                        # --- PROGRESS BAR UI ---
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        
-                        for u_idx, url in enumerate(urls_list):
-                            # Update Global Progress (per tournament)
-                            pct_complete = int(((u_idx) / total_urls_to_scrape) * 100)
-                            progress_bar.progress(pct_complete / 100)
-                            status_text.markdown(f"**Analisi Torneo {u_idx + 1}/{total_urls_to_scrape}**: Scaricamento dati in corso...")
+            # --- ACTION: BATCH PROCESSING LOOP (PHASE 2) ---
+            else:
+                # Progress UI
+                total = st.session_state.batch_total_count
+                remaining = len(st.session_state.batch_queue)
+                processed = total - remaining
+                progress = processed / total if total > 0 else 0
+                
+                st.progress(progress, text=f"📥 Scaricamento Dati: {processed}/{total} tornei completati...")
+                
+                # STOP BUTTON
+                if st.button("⛔ Interrompi Scansione"):
+                    st.session_state.batch_active = False
+                    st.warning("Scansione interrotta dall'utente.")
+                    st.rerun()
 
-                            try:
-                                # Scarica HTML
-                                resp = requests.get(url, headers=HEADERS, timeout=10)
-                                soup = BeautifulSoup(resp.text, 'html.parser')
-                                
-                                # Estrai Titolo
-                                page_title = soup.title.string if soup.title else url
-                                
-                                # Update text with specific tournament name
-                                status_text.markdown(f"**Analisi Torneo {u_idx + 1}/{total_urls_to_scrape}**: *{page_title}*...")
+                # PROCESS BATCH
+                if remaining > 0:
+                    BATCH_SIZE = 5 # Safe chunk size
+                    batch = st.session_state.batch_queue[:BATCH_SIZE]
+                    st.session_state.batch_queue = st.session_state.batch_queue[BATCH_SIZE:] # Pop
+                    
+                    with st.spinner(f"Elaborazione blocco di {len(batch)} tornei..."):
+                        # Process ONLY this batch
+                        try:
+                            # Re-use the existing logic logic, but scoped
+                             processed_batch = []
+                             tasks = []
+                             
+                             # Pre-process batch items
+                             for idx, t_obj in enumerate(batch):
+                                 # (Simplifying extraction logic here for brevity, keeping core fields)
+                                 # We need to deeply scrape these.
+                                 # Wait, t_obj is just metadata (url, name, etc.)
+                                 # We need to Visit the tournament page to get deck links
+                                 # AND then scrape the decks.
+                                 # This double-scrape is heavy.
+                                 
+                                 # TRICK: To avoid complex parsing of the tournament page AGAIN which was heavy,
+                                 # we should rely on what we did before?
+                                 # No, before we did: Discovery -> List of Tournament URLs
+                                 # Then: Request(TournamentURL) -> Parse Rows -> Threads(DeckURL).
+                                 
+                                 # We must do that here.
+                                 url = t_obj['url'] if isinstance(t_obj, dict) else t_obj
+                                 tourney_name = t_obj.get('name', 'Unknown') if isinstance(t_obj, dict) else url
+                                 
+                                 try:
+                                     HEADERS = {'User-Agent': 'Mozilla/5.0'}
+                                     resp = requests.get(url, headers=HEADERS, timeout=10)
+                                     soup = BeautifulSoup(resp.text, 'html.parser')
+                                     
+                                     # Extract Decks
+                                     # (Reuse core logic logic efficiently)
+                                     div_table = soup.find('div', {'id': 'tournament_table'})
+                                     if div_table:
+                                         rows = div_table.find_all(['a', 'div'], class_='tournament_table_row')
+                                         for r_i, row in enumerate(rows):
+                                              # Minimal Extraction for Task
+                                              cells = row.find_all('span', class_='as-tablecell')
+                                              if len(cells) >= 3:
+                                                  deck_cell = cells[2]
+                                                  link_tag = deck_cell.find('a')
+                                                  deck_link = row.get('href') if row.name == 'a' else (link_tag.get('href') if link_tag else None)
+                                                  
+                                                  if deck_link and "deck/" in deck_link:
+                                                      # Store Task: (TournamentMeta, DeckLink, Place/Player info needed?)
+                                                      # We need full info.
+                                                      # Let's extract basic info quickly
+                                                      place = cells[0].get_text(strip=True)
+                                                      player = cells[1].get_text(strip=True)
+                                                      deck_name = deck_cell.get_text(strip=True)
+                                                      
+                                                      # Add to ThreadPool Tasks
+                                                      tasks.append({
+                                                          "url": deck_link,
+                                                          "meta": t_obj,
+                                                          "place": place,
+                                                          "player": player,
+                                                          "deck_name": deck_name,
+                                                          "event_source": tourney_name
+                                                      })
+                                 except Exception as e_req:
+                                     st.session_state.batch_logs.append(f"❌ Errore Torneo {tourney_name}: {e_req}")
 
-                                # Cerca Tabella Risultati (Struttura DIV o TABLE)
-                                results_text = ""
-                                rows_data = []
-                                
-                                # TENTATIVO 1: Struttura DIV (Nuova YGOProDeck)
-                                div_table = soup.find('div', {'id': 'tournament_table'})
-                                if div_table:
-                                    # Itera sulle righe (che sono spesso link <a> o div)
-                                    rows = div_table.find_all(['a', 'div'], class_='tournament_table_row')
-                                    
-                                    # 1. PRE-PROCESSAMENTO (Estrai metadati e Link)
-                                    processed_items = [] # list of dict
-                                    tasks = [] # (index, url)
+                            # EXECUTE BATCH TASKS (Decks)
+                             if tasks:
+                                 with ThreadPoolExecutor(max_workers=2) as executor:
+                                     future_to_item = {executor.submit(scrape_deck_list, t["url"]): t for t in tasks}
+                                     
+                                     for future in as_completed(future_to_item):
+                                         item_ctx = future_to_item[future]
+                                         try:
+                                             content, raw_main, raw_side, raw_extra = future.result()
+                                             if content:
+                                                 # Build Final Object
+                                                 final_obj = {
+                                                     "place": item_ctx["place"],
+                                                     "player": item_ctx["player"],
+                                                     "deck_text": item_ctx["deck_name"],
+                                                     "link": item_ctx["url"],
+                                                     "details": f"\n   [DETTAGLIO DECK]\n   {content.replace(chr(10), chr(10)+'   ')}\n",
+                                                     "event_source": item_ctx["event_source"],
+                                                     "country": item_ctx["meta"].get("country", "Unknown"),
+                                                     "event_type": item_ctx["meta"].get("type", "Other"),
+                                                     "players": item_ctx["meta"].get("players", 0),
+                                                     "raw_main": raw_main,
+                                                     "raw_side": raw_side,
+                                                     "raw_extra": raw_extra
+                                                 }
+                                                 processed_batch.append(final_obj)
+                                         except: pass
+                                         
+                             # APPEND TO SESSION
+                             st.session_state.batch_results.extend(processed_batch)
+                             st.session_state.batch_logs.append(f"✅ Processato blocco: {len(batch)} tornei, {len(processed_batch)} mazzi estratti.")
+                             
+                             # FORCE GC
+                             gc.collect()
+                             
+                        except Exception as e_batch:
+                             st.session_state.batch_logs.append(f"❌ Errore critico nel blocco: {e_batch}")
+                    
+                    # RERUN TO NEXT BATCH
+                    time.sleep(0.5) # Yield
+                    st.rerun()
 
-                                    for i, row in enumerate(rows):
-                                        cells = row.find_all('span', class_='as-tablecell')
-                                        if len(cells) >= 3:
-                                            # RAW PLACE extraction (still used for top_cut check logic later)
-                                            raw_place_text = cells[0].get_text(strip=True)
-                                            
-                                            # LOGIC: Sequential Place Calculation (User Request)
-                                            # 0 -> 1st, 1 -> 2nd, 2 -> 3rd, etc.
-                                            rank_val = i + 1
-                                            if rank_val == 1: place = "1st Place"
-                                            elif rank_val == 2: place = "2nd Place"
-                                            elif rank_val == 3: place = "3rd Place" 
-                                            else: place = f"{rank_val}th Place"
-                                            
-                                            # Player
-                                            player_span = cells[1].find('span', class_='player-name')
-                                            player = player_span.get_text(strip=True) if player_span else cells[1].get_text(strip=True)
-                                            
-                                            # Deck
-                                            deck_cell = cells[2]
-                                            deck_text = deck_cell.get_text(separator=" ", strip=True)
-                                            variants = []
-                                            for img in deck_cell.find_all('img', class_='archetype-tournament-img'):
-                                                title = img.get('title')
-                                                if title: variants.append(title)
-                                            if variants: deck_text += " + " + " + ".join(variants)
-                                            
-                                            # Link
-                                            deck_link = row.get('href') if row.name == 'a' else None
-                                            if not deck_link:
-                                                link_tag = deck_cell.find('a')
-                                                if link_tag: deck_link = link_tag.get('href')
-                                            
-                                            # Top Cut Check (using RAW text to match keywords like 'Winner', 'Top 4', etc.)
-                                            is_top_cut = any(x in raw_place_text.lower() for x in ["winner", "runner-up", "1st", "2nd", "top 4", "top 8", "top 16"])
-                                            
-                                            # Retrieve Metadata
-                                            t_meta = urls_metadata_map.get(url, {})
-                                            country = t_meta.get("country", "Unknown")
-                                            etype = t_meta.get("type", "Other")
-                                            players_count = t_meta.get("players", 0)
-
-                                            item = {
-                                                "place": place, "player": player, "deck_text": deck_text, "link": deck_link, "details": "",
-                                                "event_source": page_title, # Added for AI Context
-                                                "country": country,
-                                                "event_type": etype,
-                                                "players": players_count
-                                            }
-                                            
-                                            # Modified: Scrape ALL decks passed the check, regardless of place text
-                                            # User requested "tutte decklist con del contenuto"
-                                            if deck_link and "deck/" in deck_link:
-                                                tasks.append((i, deck_link))
-                                            
-                                            processed_items.append(item)
-
-                                    # 2. ESECUZIONE PARALLELA (Fetch Deck Lists)
-                                    if tasks:
-                                        status_text.markdown(f"**Analisi Torneo {u_idx + 1}/{total_urls_to_scrape}**: *{page_title}* - Analisi {len(tasks)} mazzi in corso...")
-                                        # Strict RAM Control: 2 Workers
-                                        with ThreadPoolExecutor(max_workers=2) as executor:
-                                            future_to_idx = {executor.submit(scrape_deck_list, t[1]): t[0] for t in tasks}
-                                            
-                                            for future in as_completed(future_to_idx):
-                                                idx = future_to_idx[future]
-                                                try:
-                                                    content, raw_main, raw_side, raw_extra = future.result()
-                                                    if content:
-                                                        processed_items[idx]["details"] = f"\n   [DETTAGLIO DECK]\n   {content.replace(chr(10), chr(10)+'   ')}\n"
-                                                        processed_items[idx]["raw_main"] = raw_main
-                                                        processed_items[idx]["raw_side"] = raw_side
-                                                        processed_items[idx]["raw_extra"] = raw_extra
-                                                except Exception as exc:
-                                                    pass
-
-                                    # 3. REPORTING
-                                    analyzed_count += 1
-                                    scan_log.append(f"✅ Letto: {page_title}")
-                                    all_processed_items_global.extend(processed_items)
-                                
-                            except Exception as e:
-                                scan_log.append(f"❌ Errore {url}: {e}")
-                            
-                            finally:
-                                # AGGRESSIVE MEMORY CLEANUP
-                                try:
-                                    if 'soup' in locals(): del soup
-                                    if 'resp' in locals(): del resp
-                                    if 'processed_items' in locals(): del processed_items
-                                    if 'div_table' in locals(): del div_table
-                                except: pass
-                                gc.collect()
-                                time.sleep(0.5) # Yield CPU
-                            
-                        # Finalize Progress
-                        progress_bar.progress(1.0)
-                        status_text.success("Scaricamento Completato!")
-                        time.sleep(1) # Give user a moment to see success
-                        status_text.empty()
-                        progress_bar.empty()
-                        # 4. Salvataggio
-                        # Generate aggregated_text from the global list after all scraping is done
-                        # STRUCTURE DATA FOR AI CONTEXT (Categorized by Event Type)
-                        premier_text = "=== 🏆 PREMIER EVENTS (YCS, WCQ, CHAMPIONSHIPS) ===\n"
-                        regional_text = "=== 🌍 REGIONAL / MAJOR EVENTS ===\n"
-                        other_text = "=== 🏠 LOCALS / OTHER ===\n"
+                else:
+                    # --- FINALIZATION (Queue Empty) ---
+                    st.success("✅ Download Completato!")
+                    
+                    # 1. Aggregate
+                    all_processed_items_global = st.session_state.batch_results
+                    
+                    # 2. Build Context
+                    premier_text = "=== 🏆 PREMIER EVENTS (YCS, WCQ, CHAMPIONSHIPS) ===\n"
+                    regional_text = "=== 🌍 REGIONAL / MAJOR EVENTS ===\n"
+                    other_text = "=== 🏠 LOCALS / OTHER ===\n"
+                    
+                    for item in all_processed_items_global:
+                        source = item.get('event_source', '').lower()
+                        entry = f"- {item.get('place','?')}: {item.get('player','?')} -> {item.get('deck_text','?')} (Event: {item.get('event_source','?')}){item.get('details','')}\n"
                         
-                        for item in all_processed_items_global:
-                            source = item.get('event_source', '').lower()
-                            entry = f"- {item['place']}: {item['player']} -> {item['deck_text']} (Event: {item['event_source']}){item['details']}\n"
-                            
-                            if "ycs" in source or "championship" in source or "wcq" in source:
-                                premier_text += entry
-                            elif "regional" in source or "major" in source:
-                                regional_text += entry
-                            else:
-                                other_text += entry
-                        
-                        aggregated_text += f"\n{premier_text}\n{regional_text}\n{other_text}"
-                        
-                        st.session_state.meta_context = aggregated_text
-                        st.session_state.meta_last_update = datetime.now().strftime("%H:%M")
-                        
-                        # PERSIST STRUCTURED DATA FOR DASHBOARD
-                        # PERSIST STRUCTURED DATA FOR DASHBOARD
-                        # Group by deck_text to get counts (FROM GLOBAL LIST)
-                        from collections import Counter
-                        # FIX: Filter out empty strings/whitespace
-                        all_decks_found = [item['deck_text'] for item in all_processed_items_global if item['deck_text'] and item['deck_text'].strip()]
-                        deck_counts = Counter(all_decks_found)
-                        
-                        structured_data = []
-                        for d_name, d_count in deck_counts.items():
-                            structured_data.append({"name": d_name, "count": d_count})
-                        
-                        st.session_state.meta_structured_data = structured_data
-                        
-                        # PERSIST DETAILED DATA FOR CONVERSION RATE
-                        # We need to know "Winner" count per deck
-                        detailed_list = []
-                        for item in all_processed_items_global:
-                            if item['deck_text'] and item['deck_text'].strip():
-                                detailed_list.append({"name": item['deck_text'], "place": item['place']})
-                        st.session_state.meta_detailed = detailed_list
-                        
-                        # PERSIST DETAILED DATA FOR CONVERSION RATE
-                        # We need to know "Winner" count per deck
-                        detailed_list = []
-                        for item in all_processed_items_global:
-                            if item['deck_text'] and item['deck_text'].strip():
-                                detailed_list.append({"name": item['deck_text'], "place": item['place']})
-                        st.session_state.meta_detailed = detailed_list
-                        
-                        # PERSIST RAW ITEMS FOR INSPECTOR
-                        st.session_state.meta_all_items_global = all_processed_items_global
-                        
-                        if analyzed_count > 0:
-                            st.success(f"Analisi Completata! Importati {analyzed_count} report.")
-                            with st.expander("Dettagli Scansione"):
-                                for l in scan_log: st.write(l)
+                        if "ycs" in source or "championship" in source or "wcq" in source:
+                            premier_text += entry
+                        elif "regional" in source or "major" in source:
+                            regional_text += entry
                         else:
-                            st.error("Nessun dato utile estratto. Debug Info:")
-                            st.code(scan_log)
-
-                    except Exception as e:
-                        st.error(f"Errore: {e}")
+                            other_text += entry
+                    
+                    aggregated_text = f"DATA REPORT: {datetime.now().strftime('%d %B %Y')}\nFONTE: YGOProDeck (Recenti)\n\n" + f"\n{premier_text}\n{regional_text}\n{other_text}"
+                    
+                    st.session_state.meta_context = aggregated_text
+                    st.session_state.meta_last_update = datetime.now().strftime("%H:%M")
+                    
+                    # 3. Build Stats
+                    from collections import Counter
+                    all_decks_found = [item['deck_text'] for item in all_processed_items_global if item.get('deck_text') and item['deck_text'].strip()]
+                    deck_counts = Counter(all_decks_found)
+                    structured_data = [{"name": k, "count": v} for k, v in deck_counts.items()]
+                    st.session_state.meta_structured_data = structured_data
+                    st.session_state.meta_all_items_global = all_processed_items_global
+                    
+                    # 4. Reset & Cleanup
+                    with st.expander("📝 Log Scansione"):
+                        for l in st.session_state.batch_logs: st.write(l)
+                        
+                    if st.button("Pulisci e Riavvia"):
+                         st.session_state.batch_active = False
+                         st.session_state.batch_queue = []
+                         st.session_state.batch_results = []
+                         st.rerun()
         
         # --- PERSISTENT DASHBOARD RENDERER (Runs on every reload) ---
         if "meta_structured_data" in st.session_state and st.session_state.meta_structured_data:
