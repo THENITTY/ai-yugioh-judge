@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from duckduckgo_search import DDGS
 from yugioh_scraper import YuGiOhMetaScraper
 from PIL import Image
+import pandas as pd
 
 # Carica variabili d'ambiente da .env se presente
 load_dotenv()
@@ -197,6 +198,10 @@ def scrape_deck_list(deck_url):
         soup = BeautifulSoup(response.text, 'html.parser')
         deck_text = []
         
+        raw_main = []
+        raw_side = []
+        raw_extra = []
+
         # Cerca i container delle carte (Main, Extra, Side)
         # YGOProDeck usa div con id="main_deck", "extra_deck", "side_deck"
         # Le carte sono immagini con class="lazy" (o "master-duel-card") e attr "data-cardname"
@@ -224,17 +229,32 @@ def scrape_deck_list(deck_url):
                     
                     # Ordina per numero copie decrescente
                     card_lines = []
+                    
+                    # Create structured list for analysis
+                    structured_list = [] # List of {"amount": N, "card": {"name": "..."}}
+
                     for name, count in counts.most_common():
                         url = card_map.get(name, "")
                         # Salviamo nel contesto in formato: "3x Name <URL>" così l'LLM lo può parsare
                         card_lines.append(f"{count}x {name} <{url}>")
-                    
+                        
+                        # Populate structured raw data
+                        structured_list.append({"amount": count, "card": {"name": name, "image": url}})
+
                     deck_text.append(f"**{section_name}**:")
                     deck_text.append(", ".join(card_lines))
                     
-        return "\n".join(deck_text) if deck_text else "Nessuna carta trovata."
+                    # Save to specific raw lists
+                    if section_id == "main_deck":
+                        raw_main = structured_list
+                    elif section_id == "side_deck":
+                        raw_side = structured_list
+                    elif section_id == "extra_deck":
+                        raw_extra = structured_list
+                    
+        return ("\n".join(deck_text) if deck_text else "Nessuna carta trovata.", raw_main, raw_side, raw_extra)
     except Exception as e:
-        return f"Errore scraping deck: {e}"
+        return (f"Errore scraping deck: {e}", [], [], [])
 
 def get_card_data(card_name):
     # Rimuovi spazi extra per sicurezza
@@ -987,7 +1007,18 @@ elif mode == "📊 Meta Analyst":
 
                         # 3. Deep Scrape dei Link Trovati
                         analyzed_count = 0
-                        for url in urls_to_scrape:
+                        total_urls_to_scrape = len(list(urls_to_scrape)) # Convert to list if generator, though usually list here
+                        
+                        # --- PROGRESS BAR UI ---
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        for u_idx, url in enumerate(urls_to_scrape):
+                            # Update Global Progress (per tournament)
+                            pct_complete = int(((u_idx) / total_urls_to_scrape) * 100)
+                            progress_bar.progress(pct_complete / 100)
+                            status_text.markdown(f"**Analisi Torneo {u_idx + 1}/{total_urls_to_scrape}**: Scaricamento dati in corso...")
+
                             try:
                                 # Scarica HTML
                                 resp = requests.get(url, headers=HEADERS, timeout=10)
@@ -996,6 +1027,9 @@ elif mode == "📊 Meta Analyst":
                                 # Estrai Titolo
                                 page_title = soup.title.string if soup.title else url
                                 
+                                # Update text with specific tournament name
+                                status_text.markdown(f"**Analisi Torneo {u_idx + 1}/{total_urls_to_scrape}**: *{page_title}*...")
+
                                 # Cerca Tabella Risultati (Struttura DIV o TABLE)
                                 results_text = ""
                                 rows_data = []
@@ -1069,16 +1103,20 @@ elif mode == "📊 Meta Analyst":
 
                                     # 2. ESECUZIONE PARALLELA (Fetch Deck Lists)
                                     if tasks:
-                                        st.toast(f"📥 Scarico in parallelo {len(tasks)} liste per {page_title}...")
+                                        status_text.markdown(f"**Analisi Torneo {u_idx + 1}/{total_urls_to_scrape}**: *{page_title}* - Analisi {len(tasks)} mazzi in corso...")
                                         with ThreadPoolExecutor(max_workers=10) as executor:
                                             future_to_idx = {executor.submit(scrape_deck_list, t[1]): t[0] for t in tasks}
                                             
                                             for future in as_completed(future_to_idx):
                                                 idx = future_to_idx[future]
                                                 try:
-                                                    content = future.result()
+                                                    # Fix: Now unpacking 4 values (including extra)
+                                                    content, raw_main, raw_side, raw_extra = future.result()
                                                     if content:
                                                         processed_items[idx]["details"] = f"\n   [DETTAGLIO DECK]\n   {content.replace(chr(10), chr(10)+'   ')}\n"
+                                                        processed_items[idx]["raw_main"] = raw_main
+                                                        processed_items[idx]["raw_side"] = raw_side
+                                                        processed_items[idx]["raw_extra"] = raw_extra
                                                 except Exception as exc:
                                                     pass
 
@@ -1092,7 +1130,13 @@ elif mode == "📊 Meta Analyst":
                                 
                             except Exception as e:
                                 scan_log.append(f"❌ Errore {url}: {e}")
-
+                            
+                        # Finalize Progress
+                        progress_bar.progress(1.0)
+                        status_text.success("Scaricamento Completato!")
+                        time.sleep(1) # Give user a moment to see success
+                        status_text.empty()
+                        progress_bar.empty()
                         # 4. Salvataggio
                         # Generate aggregated_text from the global list after all scraping is done
                         # STRUCTURE DATA FOR AI CONTEXT (Categorized by Event Type)
@@ -1258,6 +1302,128 @@ elif mode == "📊 Meta Analyst":
                          st.caption(f"Winrate **{pct}%** ({stats['wins']}/{stats['total']} Top).")
                      else:
                          st.info("Nessun vincitore trovato tra i Top 6 mazzi filtrati.")
+
+            # --- 3. TECH & STAPLE ANALYSIS (NEW) ---
+            st.divider()
+            # --- 3. TECH & STAPLE ANALYSIS (NEW) ---
+            st.divider()
+            with st.expander("📉 Analisi Tech & Staple (No AI)", expanded=False):
+                st.caption("Statistiche calcolate in tempo reale sui mazzi filtrati.")
+                
+                # Helper to count cards
+                # items have 'raw_main', 'raw_side', 'raw_extra'
+                
+                # BUGFIX: Only count decks that actully have a list!
+                valid_items = [i for i in filtered_items if i.get("raw_main")]
+                total_decks = len(valid_items)
+                
+                if total_decks > 0:
+                    main_counts = {} # name -> count of DECKS containing it (not total copies)
+                    side_counts = {}
+                    extra_counts = {}
+                    
+                    # We want representation % (Usage Rate)
+                    # i.e. "Ash Blossom" is in 80% of decks.
+                    
+                    for item in valid_items:
+                        # Helper for extraction
+                        def extract_unique_names(raw_list):
+                            names = set()
+                            for c_entry in raw_list:
+                                c_name = c_entry.get("card", {}).get("name")
+                                if c_name: names.add(c_name)
+                            return names
+
+                        # Main
+                        for c in extract_unique_names(item.get("raw_main", [])):
+                            main_counts[c] = main_counts.get(c, 0) + 1
+                            
+                        # Side
+                        for c in extract_unique_names(item.get("raw_side", [])):
+                            side_counts[c] = side_counts.get(c, 0) + 1
+                            
+                        # Extra
+                        for c in extract_unique_names(item.get("raw_extra", [])):
+                            extra_counts[c] = extra_counts.get(c, 0) + 1
+                    
+                    # Sort by frequency
+                    sorted_main = sorted(main_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+                    sorted_side = sorted(side_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+                    sorted_extra = sorted(extra_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+                    
+                    # CSS to Hide Toolbar for a specialized minimal look
+                    st.markdown("""
+                    <style>
+                    [data-testid="stElementToolbar"] {
+                        display: none;
+                    }
+                    </style>
+                    """, unsafe_allow_html=True)
+                    
+                    # Helper for DataFrame
+                    def create_stat_df(sorted_data, total):
+                        data = []
+                        for name, count in sorted_data:
+                            pct = (count / total) * 100
+                            # FORMAT: Strigified percentage for cleaner look
+                            data.append({"Carta": name, "%": f"{int(pct)}%"}) 
+                        return pd.DataFrame(data)
+
+                    # --- VERTICAL EXPANDER LAYOUT ---
+                    
+                    with st.expander("⚔️ Top Main Deck", expanded=False):
+                        df_main = create_stat_df(sorted_main, total_decks)
+                        st.dataframe(
+                            df_main,
+                            hide_index=True,
+                            use_container_width=True
+                        )
+
+                    with st.expander("🛡️ Top Side Deck", expanded=False):
+                        df_side = create_stat_df(sorted_side, total_decks)
+                        st.dataframe(
+                            df_side,
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                            
+                    with st.expander("🟣 Top Extra Deck", expanded=False):
+                        df_extra = create_stat_df(sorted_extra, total_decks)
+                        st.dataframe(
+                            df_extra,
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                            
+                    st.divider()
+                    st.markdown("#### 🔎 Cerca Carta")
+                    
+                    # Collect ALL unique card names for the dropdown
+                    all_card_names = sorted(list(set(list(main_counts.keys()) + list(side_counts.keys()) + list(extra_counts.keys()))))
+                    
+                    search_card = st.selectbox(
+                        "Seleziona una carta per vedere le statistiche:",
+                        options=[""] + all_card_names,
+                        index=0,
+                        placeholder="Digita il nome della carta..."
+                    )
+
+                    if search_card:
+                         m_count = main_counts.get(search_card, 0)
+                         s_count = side_counts.get(search_card, 0)
+                         e_count = extra_counts.get(search_card, 0)
+                         
+                         m_pct = int((m_count / total_decks) * 100)
+                         s_pct = int((s_count / total_decks) * 100)
+                         e_pct = int((e_count / total_decks) * 100)
+                         
+                         res_col1, res_col2, res_col3 = st.columns(3)
+                         res_col1.metric("Main Deck", f"{m_pct}%")
+                         res_col2.metric("Side Deck", f"{s_pct}%")
+                         res_col3.metric("Extra Deck", f"{e_pct}%")
+                         
+                else:
+                    st.info("Nessun dato grezzo disponibile per l'analisi Tech. Prova ad aggiornare il database.")
 
             # --- INTERACTIVE DECK INSPECTOR ---
             st.subheader("🔍 Ispeziona Decklist")
@@ -1619,6 +1785,30 @@ elif mode == "📊 Meta Analyst":
                                     cnt = Counter(deck_names)
                                     structured_data = [{"name": k, "count": v} for k, v in cnt.items()]
                                     st.session_state.meta_structured_data = structured_data
+                                    
+                                    # PERSIST RAW ITEMS FOR TECH ANALYSIS (Global)
+                                    # We need to map raw deck data to the format used by the Inspector
+                                    global_items = []
+                                    for d in all_decks_data:
+                                        # d is the raw JSON from scraping
+                                        item = {
+                                            "event_source": d.get("_eventName", "Unknown Event"),
+                                            "country": d.get("country", "Global"), # Check if this exists in deck dict, might need to pass it down
+                                            "place": d.get("tournamentPlacement", "N/A"),
+                                            "player": d.get("author", "Unknown"),
+                                            "deck_text": d.get("deckType", {}).get("name", "Unknown"),
+                                            "players": 0, # Not readily available in deck dict unless passed down
+                                            "event_type": "Other", # Context needed
+                                            "details": scraper.parse_deck_list(d), # String format for legacy viewer
+                                            "link": d.get("chart", "#"), # Just a link if available or placeholder
+                                            
+                                            # CRITICAL: RAW DATA FOR TECH ANALYSIS
+                                            "raw_main": d.get("main", []),
+                                            "raw_side": d.get("side", [])
+                                        }
+                                        global_items.append(item)
+                                    
+                                    st.session_state.meta_all_items_global = global_items
                                     
                                     status.update(label="Scraping Multiplo Completato!", state="complete", expanded=False)
                                     st.success("✅ Database Meta Aggiornato con successo!")
