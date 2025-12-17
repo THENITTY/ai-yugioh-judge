@@ -1007,13 +1007,18 @@ elif mode == "📊 Meta Analyst":
 
                         # 3. Deep Scrape dei Link Trovati
                         analyzed_count = 0
-                        total_urls_to_scrape = len(list(urls_to_scrape)) # Convert to list if generator, though usually list here
+                        urls_list = list(urls_to_scrape) # Convert to list to check length
+                        total_urls_to_scrape = len(urls_list) 
+                        
+                        if total_urls_to_scrape == 0:
+                             st.error("❌ Nessun torneo trovato! È possibile che il sito abbia bloccato la richiesta o che ci siano problemi con lo scraper (Playwright/Cloud).")
+                             st.info("💡 Suggerimento: Riprova tra qualche minuto.")
                         
                         # --- PROGRESS BAR UI ---
                         progress_bar = st.progress(0)
                         status_text = st.empty()
                         
-                        for u_idx, url in enumerate(urls_to_scrape):
+                        for u_idx, url in enumerate(urls_list):
                             # Update Global Progress (per tournament)
                             pct_complete = int(((u_idx) / total_urls_to_scrape) * 100)
                             progress_bar.progress(pct_complete / 100)

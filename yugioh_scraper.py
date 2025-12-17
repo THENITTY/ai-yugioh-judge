@@ -225,20 +225,29 @@ class YuGiOhMetaScraper:
             with sync_playwright() as p:
                 # AUTO-INSTALL FIX FOR CLOUD ENVIRONMENTS (Hugging Face)
                 try:
+                    # Cloud-optimized launch args
+                    LAUNCH_ARGS = [
+                        "--no-sandbox", 
+                        "--disable-dev-shm-usage", 
+                        "--disable-gpu", 
+                        "--disable-setuid-sandbox", 
+                        "--single-process" # Sometimes helps in strict containers
+                    ]
                     browser = p.chromium.launch(
                         headless=True,
-                        args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+                        args=LAUNCH_ARGS
                     )
                 except Exception as e:
                     print(f"Browser launch failed, attempting install... Error: {e}")
                     subprocess.run(["playwright", "install", "chromium"], check=True)
                     browser = p.chromium.launch(
                         headless=True,
-                        args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+                        args=LAUNCH_ARGS
                     )
 
                 page = browser.new_page()
-                page.goto("https://ygoprodeck.com/tournaments/", timeout=60000)
+                # Increased timeout for slow cloud networks
+                page.goto("https://ygoprodeck.com/tournaments/", timeout=90000)
                 
                 # Loop through desired tiers
                 # User definition: Tier 3 = Premier (YCS), Tier 2 = Competitive
