@@ -439,7 +439,7 @@ class YuGiOhMetaScraper:
             return list(links)
         except Exception as e:
             print(f"Playwright Error YGOP: {e}")
-            return []
+            raise e # Raise to app.py so user sees the error (Timeout, Blocked, etc.)
 
     def _format_rank(self, placement):
         try:
