@@ -608,7 +608,13 @@ if mode == "👨‍⚖️ AI Judge":
                 
                 if card_data:
                     found_cards_data.append(card_data)
-                    cards_context += f"NOME UFFICIALE: {card_data['name']}\nTESTO AGGIORNATO: {card_data['desc']}\n\n"
+                    # FIX: Add ATK/DEF/Type to context for accurate stat rulings
+                    c_type = card_data.get('type', 'Unknown')
+                    c_atk = f"ATK: {card_data.get('atk', '?')}" if 'Monster' in c_type else ""
+                    c_def = f"DEF: {card_data.get('def', '?')}" if 'Monster' in c_type else ""
+                    c_stats = f"[{c_type} | {c_atk} {c_def}]".replace("  ", " ").strip()
+                    
+                    cards_context += f"NOME UFFICIALE: {card_data['name']}\nDATI: {c_stats}\nTESTO AGGIORNATO: {card_data['desc']}\n\n"
                     st.success(f"✅ Trovata: {card_data['name']}")
                 else:
                     missing_cards.append(card_name)
