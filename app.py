@@ -600,7 +600,7 @@ if mode == "👨‍⚖️ AI Judge":
             preview_data = get_card_data(card)
             with col_img:
                 if preview_data and "card_images" in preview_data:
-                    st.image(preview_data["card_images"][0]["image_url_small"], use_container_width=True)
+                    render_responsive_image(preview_data["card_images"][0]["image_url_small"])
                 else:
                     st.write("🖼️")
             with col_input:
