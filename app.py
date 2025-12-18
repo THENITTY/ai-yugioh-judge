@@ -1130,7 +1130,7 @@ elif mode == "📊 Meta Analyst":
                                                           place = raw_place if raw_place else f"Rank {r_i+1}"
                                                           
                                                       player = cells[1].get_text(strip=True)
-                                                      render_responsive_image(card['url'])
+
                                                       deck_name = deck_cell.get_text(strip=True)
                                                       
                                                       # Add to ThreadPool Tasks
